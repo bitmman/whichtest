@@ -48,6 +48,7 @@ result.flagged                 # True if a check failed or the cross-check disag
 - **All 51 tests implemented**, each with assumption checks, effect sizes, an independent cross-check, and a unit test (`uv run whichtest list`). Includes a DeLong implementation validated against a bootstrap.
 - The 12 judgment tests refuse to run until `spec.decisions` carries the human choices (`uv run whichtest show lmm` lists them), and echo those choices in the result.
 - Skill written; not yet exercised on a real study.
-- A third-party review (2026-10-12) found 13 defects, all fixed and pinned by regression tests; see the review log in CLAUDE.md.
+- Two rounds of third-party review (2026-10-12) found 13 + 9 defects, all fixed and pinned by tests. The second round also contributed 107 independent acceptance tests (`tests/test_independent_*.py`, documented in `tests/INDEPENDENT_TESTS.md`) with reference values computed outside the package; the whole suite is 249 tests. See the review log in CLAUDE.md.
+- One-sided alternatives are accepted only by the tests that can honour them end to end; the others reject the request instead of quietly reporting a two-sided p-value.
 
 Next: try it on a real (synthetic-stand-in) analysis end to end, then tighten what the skill asks.

@@ -13,7 +13,7 @@ from ..result import Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 
 
-@procedure("one_sample_t", requires=("outcome",))
+@procedure("one_sample_t", requires=("outcome",), directional=True)
 def one_sample_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     x = column(df, spec.variables.outcome, "outcome")
     x = x[~np.isnan(x)]
@@ -47,7 +47,7 @@ def one_sample_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     )
 
 
-@procedure("indep_t", requires=("outcome", "group"))
+@procedure("indep_t", requires=("outcome", "group"), directional=True)
 def indep_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     g = groups(df, spec.variables.outcome, spec.variables.group)
     if len(g) != 2:
@@ -85,7 +85,7 @@ def indep_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     )
 
 
-@procedure("paired_t", requires=("before|columns|outcome",))
+@procedure("paired_t", requires=("before|columns|outcome",), directional=True)
 def paired_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     a, b, (la, lb) = paired(df, spec)  # a = first, b = second; difference = second − first
     res = stats.ttest_rel(b, a, alternative=spec.alternative)

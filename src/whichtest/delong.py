@@ -49,8 +49,8 @@ def _order(y: np.ndarray, *scores: np.ndarray) -> tuple[np.ndarray, int]:
 def delong_auc_variance(y: np.ndarray, score: np.ndarray) -> tuple[float, float]:
     """AUC and its DeLong variance for one score."""
     preds, m = _order(y, score)
-    if m == 0 or m == preds.shape[1]:
-        raise ValueError("need both positive and negative cases")
+    if m < 2 or preds.shape[1] - m < 2:
+        raise ValueError("DeLong variance needs at least two positive and two negative cases")
     aucs, cov = _fast_delong(preds, m)
     return float(aucs[0]), float(cov[0, 0])
 
@@ -68,8 +68,8 @@ def delong_paired(y: np.ndarray, score_a: np.ndarray, score_b: np.ndarray, level
     Returns auc_a, auc_b, diff, se, ci, z, p (two-sided).
     """
     preds, m = _order(y, score_a, score_b)
-    if m == 0 or m == preds.shape[1]:
-        raise ValueError("need both positive and negative cases")
+    if m < 2 or preds.shape[1] - m < 2:
+        raise ValueError("DeLong variance needs at least two positive and two negative cases")
     aucs, cov = _fast_delong(preds, m)
     diff = float(aucs[0] - aucs[1])
     var = float(cov[0, 0] + cov[1, 1] - 2 * cov[0, 1])

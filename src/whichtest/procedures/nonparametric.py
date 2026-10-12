@@ -65,13 +65,13 @@ def _wilcoxon_core(d: np.ndarray, spec: Spec, test: str, labels: str) -> TestRes
     )
 
 
-@procedure("wilcoxon_signed", requires=("before|columns|outcome",))
+@procedure("wilcoxon_signed", requires=("before|columns|outcome",), directional=True)
 def wilcoxon_signed(df: pd.DataFrame, spec: Spec) -> TestResult:
     a, b, (la, lb) = paired(df, spec)
     return _wilcoxon_core(b - a, spec, "wilcoxon_signed", f"difference ({lb} − {la})")
 
 
-@procedure("one_sample_wilcoxon", requires=("outcome",))
+@procedure("one_sample_wilcoxon", requires=("outcome",), directional=True)
 def one_sample_wilcoxon(df: pd.DataFrame, spec: Spec) -> TestResult:
     x = column(df, spec.variables.outcome, "outcome")
     x = x[~np.isnan(x)]
@@ -81,7 +81,7 @@ def one_sample_wilcoxon(df: pd.DataFrame, spec: Spec) -> TestResult:
     return r
 
 
-@procedure("mann_whitney", requires=("outcome", "group"))
+@procedure("mann_whitney", requires=("outcome", "group"), directional=True)
 def mann_whitney(df: pd.DataFrame, spec: Spec) -> TestResult:
     g = groups(df, spec.variables.outcome, spec.variables.group)
     if len(g) != 2:

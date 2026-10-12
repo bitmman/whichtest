@@ -8,7 +8,7 @@ import statsmodels.formula.api as smf
 from scipy import stats
 
 from .. import checks
-from ..data import column
+from ..data import column, formula_columns
 from ..registry import procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
@@ -42,7 +42,7 @@ def _coef_estimates(m, level: float, exp: bool = False, name: str = "") -> list[
     return out
 
 
-@procedure("simple_lin_reg", requires=("x|predictors|formula", "y|outcome|formula"))
+@procedure("simple_lin_reg", requires=("x|predictors|formula", "y|outcome|formula"), directional=True)
 def simple_lin_reg(df: pd.DataFrame, spec: Spec) -> TestResult:
     v = spec.variables
     xname = v.x or (v.predictors[0] if v.predictors else None)
@@ -60,11 +60,18 @@ def simple_lin_reg(df: pd.DataFrame, spec: Spec) -> TestResult:
         x, y = x[keep], y[keep]
         m = sm.OLS(y, sm.add_constant(x)).fit()
     res = stats.linregress(x, y, alternative=spec.alternative)
+    t_slope = float(m.tvalues[1])
+    if spec.alternative == "two-sided":
+        p_sm = float(m.pvalues[1])
+    elif spec.alternative == "greater":
+        p_sm = float(stats.t.sf(t_slope, m.df_resid))
+    else:
+        p_sm = float(stats.t.cdf(t_slope, m.df_resid))
     cc = compare(
         "statsmodels OLS",
         "Slope, intercept and p-value should match linregress exactly.",
         {"slope": res.slope, "intercept": res.intercept, "p": res.pvalue, "r2": res.rvalue**2},
-        {"slope": m.params[1], "intercept": m.params[0], "p": m.pvalues[1], "r2": m.rsquared},
+        {"slope": m.params[1], "intercept": m.params[0], "p": p_sm, "r2": m.rsquared},
         rtol=1e-6,
     )
     ci = np.asarray(m.conf_int(alpha=1 - spec.ci_level))
@@ -209,9 +216,9 @@ def logistic(df: pd.DataFrame, spec: Spec) -> TestResult:
 def mnlogit(df: pd.DataFrame, spec: Spec) -> TestResult:
     f = _formula(spec, df)
     yname = spec.variables.outcome or f.split("~")[0].strip()
-    used = [c for c in df.columns if c == yname or c in spec.variables.predictors or (spec.variables.formula and c in spec.variables.formula)]
+    used = formula_columns(f, df)  # only columns the formula names, matched as whole identifiers
     d = df.dropna(subset=used).copy()  # complete cases first: Categorical would code NaN as -1, a bogus category
-    cats = pd.Categorical(d[yname])
+    cats = pd.Categorical(d[yname]).remove_unused_categories()  # declared-but-absent levels must not become a reference
     d[yname] = cats.codes
     m = smf.mnlogit(f, d).fit(disp=0, maxiter=500)
     probs = np.asarray(m.predict())

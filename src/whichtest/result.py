@@ -11,6 +11,16 @@ import numpy as np
 __all__ = ["CheckResult", "Estimate", "Comparison", "CrossCheck", "TestResult", "compare"]
 
 
+def _non_finite(v: Any) -> bool:
+    """True for NaN/inf in any real scalar type (Python float, NumPy floating, ...). None is not a value."""
+    if v is None or isinstance(v, bool):
+        return False
+    try:
+        return not math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
 def _clean(v: Any) -> Any:
     """Make values JSON-friendly."""
     if isinstance(v, (np.floating, np.integer, np.bool_)):
@@ -105,14 +115,14 @@ class TestResult:
     @property
     def significant(self) -> bool | None:
         """None when there is no p-value or inference failed (NaN p)."""
-        if self.p is None or not math.isfinite(self.p):
+        if self.p is None or _non_finite(self.p):
             return None
-        return bool(self.p < self.alpha)
+        return bool(float(self.p) < self.alpha)
 
     @property
     def inference_failed(self) -> bool:
         """A p-value or statistic that came back NaN/inf: the test ran but produced nothing usable."""
-        return any(v is not None and isinstance(v, float) and not math.isfinite(v) for v in (self.p, self.statistic))
+        return any(_non_finite(v) for v in (self.p, self.statistic))
 
     @property
     def failed_checks(self) -> list[CheckResult]:
@@ -237,6 +247,8 @@ def compare(
       reported but not compared (one method may simply have less power).
     """
     comps: list[Comparison] = []
+    if not primary:
+        return CrossCheck(method=method, why=why, kind=kind, agrees=False, comparisons=[], detail=(detail + "; " if detail else "") + "nothing was compared")
     for q, a in primary.items():
         b = secondary.get(q)
         if a is None or b is None:

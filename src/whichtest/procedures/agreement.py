@@ -14,16 +14,33 @@ from ..spec import Spec, SpecError
 
 @procedure("cohen_kappa", requires=("columns|outcome",))
 def cohen_kappa(df: pd.DataFrame, spec: Spec) -> TestResult:
-    m = blocks(df, spec)
+    m = blocks(df, spec, numeric=False)  # ratings are labels, not measurements
     if m.shape[1] != 2:
         raise SpecError("cohen_kappa needs exactly two raters; use fleiss_kappa for more")
-    r1, r2 = m.iloc[:, 0].to_numpy(), m.iloc[:, 1].to_numpy()
+    r1, r2 = m.iloc[:, 0].to_numpy(object), m.iloc[:, 1].to_numpy(object)
     wt = spec.params.get("weights")  # None | 'linear' | 'quadratic'
-    cats = sorted(set(np.unique(r1)) | set(np.unique(r2)))
+    levels = spec.params.get("levels")
+    from .categorical import _sorted_levels
+
+    cats = list(levels) if levels else _sorted_levels(list(r1) + list(r2))
+    if levels:
+        unknown = set(map(str, r1)) | set(map(str, r2)) - set(map(str, cats))
+        if unknown:
+            raise SpecError(f"ratings outside params.levels: {sorted(unknown)}")
+        cats = [c for c in cats]
+    if wt and not levels:
+        try:
+            [float(c) for c in cats]
+        except (TypeError, ValueError):
+            raise SpecError("weighted kappa needs an ordered category list: set params.levels") from None
     idx = {c: i for i, c in enumerate(cats)}
+    idx.update({str(c): i for i, c in enumerate(cats)})
+    r1 = np.array([idx[v] if v in idx else idx[str(v)] for v in r1])
+    r2 = np.array([idx[v] if v in idx else idx[str(v)] for v in r2])
+    cats_codes = list(range(len(cats)))
     table = np.zeros((len(cats), len(cats)))
     for a, b in zip(r1, r2):
-        table[idx[a], idx[b]] += 1
+        table[a, b] += 1
     res = cohens_kappa(table, wt=wt, return_results=True)
     cc = None
     try:
@@ -63,11 +80,15 @@ def cohen_kappa(df: pd.DataFrame, spec: Spec) -> TestResult:
 
 @procedure("fleiss_kappa", requires=("columns|outcome",))
 def fleiss(df: pd.DataFrame, spec: Spec) -> TestResult:
-    m = blocks(df, spec)
+    m = blocks(df, spec, numeric=False)  # ratings are labels, not measurements
     if m.shape[1] < 2:
         raise SpecError("fleiss_kappa needs at least two raters")
-    ratings = m.to_numpy()
-    counts, cats = aggregate_raters(ratings)
+    from .categorical import _sorted_levels
+
+    cats = _sorted_levels(m.to_numpy(object).ravel())
+    code = {c: i for i, c in enumerate(cats)}
+    ratings = np.vectorize(lambda v: code[v])(m.to_numpy(object)).astype(int)  # stable integer codes
+    counts, _ = aggregate_raters(ratings)
     k = float(fleiss_kappa(counts))
     cc = None
     try:
@@ -275,10 +296,15 @@ def roc_auc(df: pd.DataFrame, spec: Spec) -> TestResult:
         {"auc": u / (n1 * n0)},
         rtol=1e-10,
     )
-    auc_d, ci, se = delong_ci(truth, score, spec.ci_level)
-    p = float(2 * _st.norm.sf(abs((auc - 0.5) / se))) if se > 0 else None
+    if min(n1, n0) < 2:
+        ci, se, p = None, None, None
+        var_check = CheckResult("ci_method", "DeLong variance needs at least two cases in each class", False, None, None, f"{n1} positive, {n0} negative: the AUC is a point estimate only; no CI or test")
+    else:
+        auc_d, ci, se = delong_ci(truth, score, spec.ci_level)
+        p = float(2 * _st.norm.sf(abs((auc - 0.5) / se))) if se > 0 else None
+        var_check = checks.note("ci_method", "No CI in sklearn. Use a stratified bootstrap or DeLong", "DeLong CI reported" + ("" if se and se > 0 else "; zero DeLong variance (all pairs concordant or tied the same way)"))
     fpr, tpr, thr = roc_curve(truth, score)
-    ests = [Estimate("AUC", auc, ci, spec.ci_level, "DeLong")]
+    ests = [Estimate("AUC", auc, ci, spec.ci_level if ci else None, "DeLong" if ci else "no interval")]
     thr_fixed = spec.params.get("threshold")
     warnings = list(notes)
     if thr_fixed is not None:
@@ -299,16 +325,16 @@ def roc_auc(df: pd.DataFrame, spec: Spec) -> TestResult:
         test="roc_auc",
         n={"positive": n1, "negative": n0},
         statistic_name="z (AUC = 0.5)",
-        statistic=float((auc - 0.5) / se) if se > 0 else None,
+        statistic=float((auc - 0.5) / se) if se else None,
         p=p,
         estimates=ests,
-        effect_size=Estimate("AUC", auc, ci, spec.ci_level, "DeLong"),
+        effect_size=Estimate("AUC", auc, ci, spec.ci_level if ci else None, "DeLong" if ci else "no interval: variance not estimable"),
         checks=[
             CheckResult("positive_class", "Positive class defined explicitly", "positive_label" in spec.params, detail=f"positive = {spec.params.get('positive_label', 1)!r} ({n1} cases)" + ("" if "positive_label" in spec.params else "; set params.positive_label to be explicit")),
-            checks.note("ci_method", "No CI in sklearn. Use a stratified bootstrap or DeLong", "DeLong CI reported"),
+            var_check,
         ],
         cross_check=cc,
-        warnings=warnings,
+        warnings=warnings + (["Fewer than two cases in a class: the AUC has no estimable variance; no CI or p-value reported."] if min(n1, n0) < 2 else []),
         extra={"roc": {"fpr": fpr.tolist(), "tpr": tpr.tolist(), "thresholds": [float(t) if np.isfinite(t) else None for t in thr]}},
     )
 
@@ -324,6 +350,8 @@ def delong(df: pd.DataFrame, spec: Spec) -> TestResult:
     keep = ok_t & ~(np.isnan(a) | np.isnan(b))
     notes = _dropped_note(len(truth), keep)
     truth, a, b = truth[keep], a[keep], b[keep]
+    if min(truth.sum(), len(truth) - truth.sum()) < 2:
+        raise SpecError("delong needs at least two positive and two negative cases to estimate the AUC variance")
     res = delong_paired(truth, a, b, spec.ci_level)
     # cross-check: paired bootstrap of the AUC difference
     from sklearn.metrics import roc_auc_score

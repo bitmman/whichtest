@@ -10,7 +10,7 @@ from statsmodels.stats.contingency_tables import SquareTable, Table, Table2x2, c
 from statsmodels.stats.proportion import proportion_confint
 
 from .. import checks, effects
-from ..data import blocks, column, contingency_table
+from ..data import blocks, column, contingency_table, int_param, validate_counts
 from ..registry import procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
@@ -19,7 +19,10 @@ from ..spec import Spec, SpecError
 def _k_n(df: pd.DataFrame | None, spec: Spec) -> tuple[int, int]:
     p = spec.params
     if "k" in p and "n" in p:
-        return int(p["k"]), int(p["n"])
+        k, n = int_param(p, "k"), int_param(p, "n", minimum=1)
+        if k > n:
+            raise SpecError("params.k cannot exceed params.n")
+        return k, n
     if df is not None and spec.variables.outcome:
         y = column(df, spec.variables.outcome, "outcome")
         y = y[~np.isnan(y)]
@@ -29,7 +32,7 @@ def _k_n(df: pd.DataFrame | None, spec: Spec) -> tuple[int, int]:
     raise SpecError("binom_test needs params.k and params.n, or a 0/1 variables.outcome column")
 
 
-@procedure("binom_test", data_optional=True)
+@procedure("binom_test", data_optional=True, directional=True)
 def binom_test(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     k, n = _k_n(df, spec)
     p0 = float(spec.params.get("p0", 0.5))
@@ -58,7 +61,7 @@ def binom_test(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     )
 
 
-@procedure("two_by_two", data_optional=True)
+@procedure("two_by_two", data_optional=True, directional=True)
 def two_by_two(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     t, rows, cols = contingency_table(df, spec)
     if t.shape != (2, 2):
@@ -66,9 +69,14 @@ def two_by_two(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     exp = checks.expected_counts(t, "expected_counts", "Expected count ≥ 5 in every cell (else Fisher's exact)")
     chi2, p, dof, _ = stats.chi2_contingency(t, correction=False)
     fisher = stats.fisher_exact(t, alternative=spec.alternative)
-    use_fisher = exp.passed is False
-    tb = Table2x2(t.astype(int))
+    directional = spec.alternative != "two-sided"
+    # Fisher's exact test is the primary when cells are sparse, when asked for (params.exact), or when a
+    # one-sided alternative is requested: the chi-square test has no direction.
+    use_fisher = exp.passed is False or bool(spec.params.get("exact", False)) or directional
+    tb = Table2x2(t.astype(int), shift_zeros=False)  # the Pearson statistic must use the observed counts
     r2 = tb.test_nominal_association()
+    zero_cell = bool((t == 0).any())
+    tb_ci = Table2x2(t.astype(int)) if zero_cell else tb  # a zero cell needs the 0.5 continuity shift for OR/RR intervals
     cc = compare(
         "statsmodels.stats.contingency_tables.Table2x2.test_nominal_association",
         "The Pearson chi-square should match scipy's uncorrected statistic exactly.",
@@ -76,20 +84,22 @@ def two_by_two(df: pd.DataFrame | None, spec: Spec) -> TestResult:
         {"chi2": r2.statistic, "p": r2.pvalue},
     )
     a = 1 - spec.ci_level
-    or_ci = tb.oddsratio_confint(alpha=a)
-    rr_ci = tb.riskratio_confint(alpha=a)
+    or_ci = tb_ci.oddsratio_confint(alpha=a)
+    rr_ci = tb_ci.riskratio_confint(alpha=a)
+    shift_note = "; 0.5 added to every cell (zero cell)" if zero_cell else ""
     p1, p2_ = t[0, 0] / t[0].sum(), t[1, 0] / t[1].sum()
     rd = p1 - p2_
     se_rd = np.sqrt(p1 * (1 - p1) / t[0].sum() + p2_ * (1 - p2_) / t[1].sum())
     z = stats.norm.ppf(0.5 + spec.ci_level / 2)
     ests = [
-        Estimate("odds ratio", float(tb.oddsratio), (float(or_ci[0]), float(or_ci[1])), spec.ci_level),
-        Estimate("risk ratio", float(tb.riskratio), (float(rr_ci[0]), float(rr_ci[1])), spec.ci_level, "not valid for case–control sampling"),
+        Estimate("odds ratio", float(tb_ci.oddsratio), (float(or_ci[0]), float(or_ci[1])), spec.ci_level, "" + shift_note.lstrip("; ")),
+        Estimate("risk ratio", float(tb_ci.riskratio), (float(rr_ci[0]), float(rr_ci[1])), spec.ci_level, "not valid for case–control sampling" + shift_note),
         Estimate("risk difference", float(rd), (float(rd - z * se_rd), float(rd + z * se_rd)), spec.ci_level, "Wald"),
     ]
     warnings = []
     if use_fisher:
-        warnings.append("Small expected counts: reporting Fisher's exact p as the primary p-value; chi-square kept in extra.")
+        why = "One-sided alternative requested" if directional and exp.passed is not False else ("Requested (params.exact)" if exp.passed is not False else "Small expected counts")
+        warnings.append(f"{why}: reporting Fisher's exact p as the primary p-value; the (two-sided) chi-square is kept in extra.")
     return TestResult(
         test="two_by_two",
         n=int(t.sum()),
@@ -110,7 +120,7 @@ def two_by_two(df: pd.DataFrame | None, spec: Spec) -> TestResult:
 def chi_sq_indep(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     t, rows, cols = contingency_table(df, spec)
     chi2, p, dof, _ = stats.chi2_contingency(t, correction=False)
-    r2 = Table(t).test_nominal_association()
+    r2 = Table(t, shift_zeros=False).test_nominal_association()  # same observed counts as scipy, zeros included
     cc = compare(
         "statsmodels.stats.contingency_tables.Table.test_nominal_association",
         "Second implementation. The statistic and p-value should match.",
@@ -118,7 +128,7 @@ def chi_sq_indep(df: pd.DataFrame | None, spec: Spec) -> TestResult:
         {"chi2": r2.statistic, "p": r2.pvalue, "df": r2.df},
     )
     exp = checks.expected_counts(t, "expected_counts", "Expected count ≥ 5 in at least 80% of cells, none < 1")
-    resid = np.asarray(Table(t).standardized_resids)
+    resid = np.asarray(Table(t, shift_zeros=False).standardized_resids)
     warnings = []
     extra = {"table": t.tolist(), "rows": [str(r) for r in rows], "cols": [str(c) for c in cols], "standardized_resids": resid.tolist()}
     if exp.passed is False:
@@ -211,16 +221,27 @@ def chi_gof(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     )
 
 
+def _sorted_levels(values) -> list:
+    """Category levels in a stable order: numeric order when all numeric, else string order."""
+    levels = list(pd.unique(np.asarray(list(values), dtype=object)))
+    try:
+        return sorted(levels, key=float)
+    except (TypeError, ValueError):
+        return sorted(levels, key=str)
+
+
 def _paired_table(df: pd.DataFrame | None, spec: Spec) -> np.ndarray:
     if "table" in spec.params:
-        t = np.asarray(spec.params["table"], float)
+        t = validate_counts(spec.params["table"], "params.table")
+        if t.ndim != 2:
+            raise SpecError("params.table must be a 2-D array of counts")
         return t
     if df is None:
         raise SpecError(f"{spec.test} needs params.table or paired columns")
     from ..data import paired
 
-    a, b, _ = paired(df, spec)
-    cats = sorted(set(np.unique(a)) | set(np.unique(b)))
+    a, b, _ = paired(df, spec, numeric=False)  # nominal labels stay labels
+    cats = _sorted_levels(list(a) + list(b))
     idx = {c: i for i, c in enumerate(cats)}
     t = np.zeros((len(cats), len(cats)))
     for x, y in zip(a, b):

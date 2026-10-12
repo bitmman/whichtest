@@ -9,22 +9,21 @@ from scipy import stats
 from statsmodels.stats.rates import confint_poisson_2indep, test_poisson_2indep
 
 from .. import checks
-from ..data import column
+from ..data import column, int_param, positive_float_param
 from ..registry import procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 from .regression import _coef_estimates, _formula
 
 
-@procedure("poisson_2indep", data_optional=True)
+@procedure("poisson_2indep", data_optional=True, directional=True)
 def poisson_2indep(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     p = spec.params
     v = spec.variables
     n_drop = 0
-    if all(k in p for k in ("count1", "exposure1", "count2", "exposure2")):
-        c1, e1, c2, e2 = int(p["count1"]), float(p["exposure1"]), int(p["count2"]), float(p["exposure2"])
-        if min(c1, c2) < 0 or min(e1, e2) <= 0:
-            raise SpecError("counts must be non-negative and exposures positive")
+    if any(k in p for k in ("count1", "exposure1", "count2", "exposure2")):
+        c1, c2 = int_param(p, "count1"), int_param(p, "count2")  # validated before any cast
+        e1, e2 = positive_float_param(p, "exposure1"), positive_float_param(p, "exposure2")
         labels = ("1", "2")
     elif df is not None and v.outcome and v.group:
         y = column(df, v.outcome, "outcome")

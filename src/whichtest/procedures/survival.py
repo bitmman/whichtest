@@ -206,9 +206,12 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
         codes = et_num.astype(int)
         censor = 0
         try:
-            eoi_code = int(float(eoi))
+            eoi_f = float(eoi)
         except (TypeError, ValueError):
             raise SpecError(f"event_of_interest {eoi!r} is not a numeric code; {v.event!r} holds {np.unique(codes).tolist()}") from None
+        if not np.isfinite(eoi_f) or eoi_f != np.round(eoi_f):
+            raise SpecError(f"event_of_interest {eoi!r} is not an integer event code; {v.event!r} holds {np.unique(codes).tolist()}")
+        eoi_code = int(eoi_f)
     else:
         codes = raw_et.astype(str)
         censor = str(spec.params.get("censor_code", "0"))

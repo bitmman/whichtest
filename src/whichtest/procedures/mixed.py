@@ -15,6 +15,7 @@ from .. import checks
 from ..registry import procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
+from ..data import formula_columns
 from .regression import _formula
 
 _CORR = {
@@ -68,8 +69,7 @@ def lmm(df: pd.DataFrame, spec: Spec) -> TestResult:
     if not re_formula.startswith("~"):
         re_formula = "~" + re_formula
     reml = bool(spec.decisions["reml"])
-    cols = [c for c in df.columns if c in f or c == subj]
-    d = df.dropna(subset=[c for c in cols if c in df.columns]).copy()
+    d = df.dropna(subset=formula_columns(f, df) + [subj]).copy()
     model = smf.mixedlm(f, d, groups=d[subj], re_formula=re_formula)
     import warnings as _w
 

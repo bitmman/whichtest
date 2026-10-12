@@ -107,13 +107,14 @@ Implemented in `spec.py`. What the skill hands to the pipeline. `whichtest resol
 ```
 
 - `variables` roles: `outcome`, `group`, `subject`, `within`, `columns` (wide repeated / raters), `before`/`after`, `x`/`y`, `row`/`col`, `time`, `event`, `exposure`, `predictors`, `categorical`, `formula`. A procedure declares which it needs (`requires=`); `"a|b"` means either.
-- `params` carries test constants: `mu0`/`m0`, `p0`, `k`/`n`, `table`, `observed`/`expected`, `count1`…`exposure2`, `weights` (kappa), `timepoints`, `exact`, `zero_method`, `n_boot`, `seed`.
+- `params` carries test constants: `mu0`/`m0`, `p0`, `k`/`n`, `table`, `observed`/`expected`, `count1`…`exposure2`, `weights` and `levels` (kappa), `positive_label` / `test_positive_label`, `timepoints`, `exact`, `zero_method`, `n_boot`, `seed`. Counts, exposures and tables are validated before use (`data.validate_counts`).
+- `alternative` is honoured only by procedures registered with `directional=True`; `run()` rejects a one-sided request for the others rather than report a two-sided p-value under a one-sided label.
 - `decisions` is where judgment tests get their human choices (random-effects structure, working correlation, ICC form, sums-of-squares type, estimand). `run()` refuses a judgment test whose declared decision keys are empty.
 - The fields after the blank line are informational. `Spec.complete()` fills them from the taxonomy; if supplied they must agree or the spec is rejected.
 
 ## Result contract
 
-`run()` returns a `TestResult` (see `result.py`): `statistic`, `p`, `df`, `effect_size`, `estimates[]` (with CIs), `checks[]` (`passed` is `None` for design properties only the human can confirm), `cross_check` (method, kind, agrees, per-quantity comparisons), `fallback` (filled from the taxonomy when a check fails), `post_hoc`, `warnings`, `extra`. `result.flagged` is true when the cross-check disagrees or any check failed. `summary()` for humans, `to_json()` for machines.
+`run()` returns a `TestResult` (see `result.py`): `statistic`, `p`, `df`, `effect_size`, `estimates[]` (with CIs), `checks[]` (`passed` is `None` for design properties only the human can confirm), `cross_check` (method, kind, agrees, per-quantity comparisons), `fallback` (filled from the taxonomy when a check fails), `post_hoc`, `warnings`, `extra`. `result.flagged` is true when the cross-check could not run or disagrees, any check failed, or the statistic / p-value is not finite (`inference_failed`). `significant` is `None` when there is no usable p-value. `summary()` for humans, `to_json()` for machines.
 
 Conventions inside procedures:
 - Run the taxonomy's `run` call as the primary and its `cross` call as the secondary; never reimplement what a library provides.
@@ -217,6 +218,22 @@ Started 2026-10-12 on the user's go-ahead.
 Also from the review: the HTML drift test now parses the `NODES`/`LEAVES` literals in the finder page (via `json5`) and compares every node, option, routing target and test field with `taxonomy.json`; `zip`'s cross-check compares count-part coefficient directions with plain negative binomial instead of forcing agreement.
 
 **Not done yet from the review:** typed, procedure-specific validation of `params` and `decisions` (they are still free dicts); a CI matrix across dependency versions and a base-only install test; an executed example for the confirmatory `factor_sem` branch.
+
+**2026-10-12, round-two review (`../codex_astra_review_round2.md`, 9 findings) and independent acceptance suite** (`tests/test_independent_{exact,accuracy,models,contracts}.py`, 107 cases written by the reviewer against the public `run()` API with reference values from exact enumeration, sufficient statistics, pairwise DeLong placements and risk sets; `tests/INDEPENDENT_TESTS.md` documents them).
+
+Runtime results recorded in this session: existing suite at `e7135ed` 142 passed; independent suite before fixes **76 passed, 31 failed**, every failure mapping to R1–R9; after the fixes below **249 passed, 0 failed** for the whole suite (Python 3.12.12, NumPy 2.5, pandas 3.0, SciPy 1.18.1, statsmodels 0.15.0, pingouin 0.7.0, lifelines 0.30.0). No reviewer test was skipped, marked xfail or weakened; one reviewer test was not changed but its contract was chosen among the alternatives it allowed (R6, below).
+
+- R1 `mnlogit`: `pd.Categorical(...).remove_unused_categories()` after complete-case selection, so a declared-but-absent level can't become the reference.
+- R2 `result.py`: `inference_failed` and `significant` recognise NaN/inf in any real scalar type (`_non_finite`, via `float()`); `compare()` with nothing to compare returns `agrees=False` ("nothing was compared").
+- R3 `data.binary_labels`: the positive level need not be observed. A 0/1 column accepts 0 or 1 as positive whether or not it occurs; a labelled column with two observed levels must contain the declared positive. An all-negative prediction is a valid diagnostic test (sensitivity 0, specificity 1).
+- R4 `data.formula_columns`: complete-case selection uses the identifiers a formula names, not substring matches; used by `mnlogit` and `lmm`.
+- R5 `data.validate_counts` / `int_param` / `positive_float_param`: summary counts (`k`, `n`, `count1`…), exposures and `params.table` are validated for finiteness, integrality and range *before* any cast, for every table-taking procedure; `event_of_interest` must be an integer code.
+- R6 one-sided alternatives are now a declared capability: `@procedure(..., directional=True)` marks the 13 procedures that apply `spec.alternative` consistently in primary and cross-check (t-tests, Wilcoxons, Mann–Whitney, Pearson, Spearman, partial correlation, simple regression, binomial, rate comparison, 2×2). `run()` rejects a one-sided request for any other test instead of silently reporting two-sided results. `simple_lin_reg` derives a one-sided secondary p from the OLS t; `partial_corr` computes the requested tail and passes `alternative` to pingouin; on a 2×2 table a one-sided request makes Fisher's exact test the primary (the chi-square has no direction), announced in `warnings`, with the chi-square kept in `extra`.
+- R7 `Table(t, shift_zeros=False)` / `Table2x2(t, shift_zeros=False)` for the Pearson statistic and standardized residuals, so the cross-check tests the observed table including zero cells; a zero cell gets the 0.5 shift only for the odds-ratio / risk-ratio intervals, and the estimate's note says so.
+- R8 `blocks()` and `paired()` take `numeric=False` for nominal procedures: Cohen's and Fleiss' kappa, Stuart–Maxwell and McNemar keep string labels through complete-case selection and code them afterwards (`categorical._sorted_levels`). Weighted kappa on string labels needs `params.levels` (an ordered list).
+- R9 AUC with fewer than two cases in a class: `delong.py` raises; `roc_auc` returns the point estimate with no CI, no z/p, a failed `ci_method` check and a warning (so it is flagged); `delong` rejects with a `SpecError`.
+
+Still open after round two: typed validation of `params`/`decisions` as a whole (the count/exposure/table/event-code inputs are now validated, but the dicts are still free-form); a CI matrix and base-only install; the confirmatory `factor_sem` branch.
 
 ## Conventions
 

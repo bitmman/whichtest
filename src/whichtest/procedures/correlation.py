@@ -20,7 +20,7 @@ def _xy(df: pd.DataFrame, spec: Spec) -> tuple[np.ndarray, np.ndarray, str, str]
     return x[keep], y[keep], xn, yn
 
 
-@procedure("pearson", requires=("x|columns", "y|columns|outcome"))
+@procedure("pearson", requires=("x|columns", "y|columns|outcome"), directional=True)
 def pearson(df: pd.DataFrame, spec: Spec) -> TestResult:
     x, y, xn, yn = _xy(df, spec)
     res = stats.pearsonr(x, y, alternative=spec.alternative)
@@ -48,7 +48,7 @@ def pearson(df: pd.DataFrame, spec: Spec) -> TestResult:
     )
 
 
-@procedure("spearman", requires=("x|columns", "y|columns|outcome"))
+@procedure("spearman", requires=("x|columns", "y|columns|outcome"), directional=True)
 def spearman(df: pd.DataFrame, spec: Spec) -> TestResult:
     x, y, xn, yn = _xy(df, spec)
     res = stats.spearmanr(x, y, alternative=spec.alternative)
@@ -123,7 +123,7 @@ def point_biserial(df: pd.DataFrame, spec: Spec) -> TestResult:
 # ---------------------------------------------------------------------------
 # Partial correlation (helper)
 # ---------------------------------------------------------------------------
-@procedure("partial_corr", requires=("x", "y|outcome", "predictors"))
+@procedure("partial_corr", requires=("x", "y|outcome", "predictors"), directional=True)
 def partial_corr(df: pd.DataFrame, spec: Spec) -> TestResult:
     import statsmodels.api as sm
 
@@ -140,13 +140,18 @@ def partial_corr(df: pd.DataFrame, spec: Spec) -> TestResult:
     n, k = len(d), len(covs)
     # exact test with the right degrees of freedom (n − k − 2)
     dfree = n - k - 2
-    t = r_resid * np.sqrt(dfree / (1 - r_resid**2)) if abs(r_resid) < 1 else float("inf")
-    p = float(2 * stats.t.sf(abs(t), dfree))
+    t = r_resid * np.sqrt(dfree / (1 - r_resid**2)) if abs(r_resid) < 1 else float("inf") * np.sign(r_resid)
+    if spec.alternative == "two-sided":
+        p = float(2 * stats.t.sf(abs(t), dfree))
+    elif spec.alternative == "greater":
+        p = float(stats.t.sf(t, dfree))
+    else:
+        p = float(stats.t.cdf(t, dfree))
     cc = None
     try:
         import pingouin as pg
 
-        pc = pg.partial_corr(data=d, x=xn, y=yn, covar=covs)
+        pc = pg.partial_corr(data=d, x=xn, y=yn, covar=covs, alternative=spec.alternative)
         cc = compare(
             "pingouin.partial_corr",
             "Correlating residuals gives the same coefficient. Its p-value uses too many degrees of freedom, so trust pingouin's.",

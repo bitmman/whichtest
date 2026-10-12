@@ -8,7 +8,7 @@ import pandas as pd
 
 from .spec import Spec, SpecError
 
-__all__ = ["column", "groups", "paired", "blocks", "contingency_table", "need", "binary_labels"]
+__all__ = ["column", "groups", "paired", "blocks", "contingency_table", "need", "binary_labels", "validate_counts", "int_param", "positive_float_param", "formula_columns"]
 
 
 def need(spec: Spec, *roles: str) -> None:
@@ -62,52 +62,61 @@ def groups(df: pd.DataFrame, outcome: str | None, group: str | None, dropna: boo
     return out
 
 
-def paired(df: pd.DataFrame, spec: Spec) -> tuple[np.ndarray, np.ndarray, tuple[str, str]]:
-    """Two aligned arrays (first, second) from wide (before/after) or long (subject/within/outcome) data."""
+def paired(df: pd.DataFrame, spec: Spec, numeric: bool = True) -> tuple[np.ndarray, np.ndarray, tuple[str, str]]:
+    """Two aligned arrays (first, second) from wide (before/after) or long (subject/within/outcome) data.
+
+    ``numeric=False`` keeps the values as labels (for nominal procedures); rows with a missing
+    value in either column are dropped in both cases.
+    """
     v = spec.variables
     if v.before and v.after:
-        a = column(df, v.before, "before")
-        b = column(df, v.after, "after")
+        a = column(df, v.before, "before", numeric)
+        b = column(df, v.after, "after", numeric)
         labels = (v.before, v.after)
     elif v.columns and len(v.columns) == 2:
-        a = column(df, v.columns[0], "columns[0]")
-        b = column(df, v.columns[1], "columns[1]")
+        a = column(df, v.columns[0], "columns[0]", numeric)
+        b = column(df, v.columns[1], "columns[1]", numeric)
         labels = (v.columns[0], v.columns[1])
     elif v.outcome and v.subject and v.within:
-        m = blocks(df, spec)
+        m = blocks(df, spec, numeric)
         if m.shape[1] != 2:
             raise SpecError(f"paired data needs exactly two levels of {v.within!r}; found {m.shape[1]}")
-        a, b = m.iloc[:, 0].to_numpy(float), m.iloc[:, 1].to_numpy(float)
+        a, b = m.iloc[:, 0].to_numpy(float if numeric else object), m.iloc[:, 1].to_numpy(float if numeric else object)
         labels = (str(m.columns[0]), str(m.columns[1]))
     else:
         raise SpecError(
             f"{spec.test!r} needs paired data: set variables.before/after, variables.columns (two), "
             "or variables.outcome + subject + within"
         )
-    keep = ~(np.isnan(a) | np.isnan(b))
+    keep = ~(pd.isna(a) | pd.isna(b))
     if keep.sum() < len(a):
         a, b = a[keep], b[keep]
     return a, b, labels
 
 
-def blocks(df: pd.DataFrame, spec: Spec) -> pd.DataFrame:
+def blocks(df: pd.DataFrame, spec: Spec, numeric: bool = True) -> pd.DataFrame:
     """Subjects × conditions matrix from wide (columns) or long (outcome/subject/within) data.
 
-    Incomplete blocks are dropped and reported through the DataFrame's ``attrs['dropped']``.
+    ``numeric=False`` keeps labels as they are (nominal ratings). Incomplete blocks are dropped
+    and reported through the DataFrame's ``attrs['dropped']``.
     """
     v = spec.variables
+
+    def conv(frame: pd.DataFrame) -> pd.DataFrame:
+        return frame.apply(pd.to_numeric, errors="coerce") if numeric else frame.astype(object)
+
     if v.columns:
         for c in v.columns:
             if c not in df.columns:
                 raise SpecError(f"column {c!r} (variables.columns) is not in the data")
-        m = df[v.columns].apply(pd.to_numeric, errors="coerce")
+        m = conv(df[v.columns])
     elif v.outcome and v.subject and v.within:
         for c, r in ((v.outcome, "outcome"), (v.subject, "subject"), (v.within, "within")):
             if c not in df.columns:
                 raise SpecError(f"column {c!r} (variables.{r}) is not in the data")
         if df.duplicated([v.subject, v.within]).any():
             raise SpecError(f"more than one row per ({v.subject}, {v.within}); repeated measures must be unique")
-        m = df.pivot(index=v.subject, columns=v.within, values=v.outcome).apply(pd.to_numeric, errors="coerce")
+        m = conv(df.pivot(index=v.subject, columns=v.within, values=v.outcome))
     else:
         raise SpecError(
             f"{spec.test!r} needs repeated-measures data: set variables.columns (wide) "
@@ -119,11 +128,49 @@ def blocks(df: pd.DataFrame, spec: Spec) -> pd.DataFrame:
     return complete
 
 
+def validate_counts(values: Any, what: str, allow_zero: bool = True) -> np.ndarray:
+    """Finite, non-negative, integer-valued counts, validated *before* any cast. Returns a float array."""
+    try:
+        arr = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        raise SpecError(f"{what} must be numeric counts") from None
+    if not np.isfinite(arr).all():
+        raise SpecError(f"{what} must be finite (no NaN/inf)")
+    if (arr < 0).any() or (not allow_zero and (arr <= 0).any()):
+        raise SpecError(f"{what} must be non-negative")
+    if (arr != np.round(arr)).any():
+        raise SpecError(f"{what} must be whole numbers (counts); got a fractional value")
+    return arr
+
+
+def int_param(params: dict, name: str, minimum: int = 0) -> int:
+    """An integer-valued, finite parameter ≥ ``minimum``; rejects 2.8, -0.5, inf and NaN before casting."""
+    if name not in params:
+        raise SpecError(f"params.{name} is required")
+    arr = validate_counts([params[name]], f"params.{name}")
+    v = int(arr[0])
+    if v < minimum:
+        raise SpecError(f"params.{name} must be ≥ {minimum}")
+    return v
+
+
+def positive_float_param(params: dict, name: str) -> float:
+    if name not in params:
+        raise SpecError(f"params.{name} is required")
+    try:
+        v = float(params[name])
+    except (TypeError, ValueError):
+        raise SpecError(f"params.{name} must be numeric") from None
+    if not np.isfinite(v) or v <= 0:
+        raise SpecError(f"params.{name} must be a positive finite number")
+    return v
+
+
 def contingency_table(df: pd.DataFrame | None, spec: Spec) -> tuple[np.ndarray, list[Any], list[Any]]:
     """A contingency table from ``params['table']`` or a crosstab of variables.row × variables.col."""
     t = spec.params.get("table")
     if t is not None:
-        arr = np.asarray(t, dtype=float)
+        arr = validate_counts(t, "params.table")
         if arr.ndim != 2:
             raise SpecError("params.table must be a 2-D array of counts")
         return arr, list(range(arr.shape[0])), list(range(arr.shape[1]))
@@ -155,20 +202,33 @@ def binary_labels(df: pd.DataFrame, name: str | None, role: str, positive: Any =
             positive = 1
         else:
             raise SpecError(f"set params.{param}: {name!r} has levels {levels}")
+    if len(levels) > 2:
+        raise SpecError(f"{name!r} has {len(levels)} levels; a binary column was expected: {levels}")
+    # The positive level need not be observed: a test that calls nobody positive is still a binary
+    # test. It must be a valid level of the schema, though: a 0/1 column accepts 0 or 1, and a
+    # labelled column with two observed levels must contain the declared positive.
     if numeric:
         try:
             pos_f = float(positive)
         except (TypeError, ValueError):
             raise SpecError(f"params.{param}={positive!r} is not a level of numeric column {name!r} ({levels})") from None
-        if pos_f not in {float(v) for v in levels}:
+        observed = {float(v) for v in levels}
+        if pos_f not in observed and not (observed <= {0.0, 1.0} and pos_f in (0.0, 1.0)):
             raise SpecError(f"params.{param}={positive!r} is not among the levels of {name!r}: {levels}")
         lab = (vals.astype(float) == pos_f).astype(int)
     else:
-        if positive not in levels and str(positive) not in [str(v) for v in levels]:
+        observed_s = [str(v) for v in levels]
+        if str(positive) not in observed_s and len(levels) >= 2:
             raise SpecError(f"params.{param}={positive!r} is not among the levels of {name!r}: {levels}")
         lab = (vals.astype(str) == str(positive)).astype(int)
-    if len(levels) > 2:
-        raise SpecError(f"{name!r} has {len(levels)} levels; a binary column was expected: {levels}")
     out = np.zeros(len(raw), dtype=int)
     out[valid] = lab
     return out, valid
+
+
+def formula_columns(formula: str, df: pd.DataFrame) -> list[str]:
+    """DataFrame columns referenced by a patsy formula, by identifier token (not substring)."""
+    import re
+
+    tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", formula))
+    return [c for c in df.columns if c in tokens]
