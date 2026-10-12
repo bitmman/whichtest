@@ -10,7 +10,7 @@ from .. import checks, effects
 from ..data import column, groups, paired
 from ..registry import procedure
 from ..result import Estimate, TestResult, compare
-from ..spec import Spec
+from ..spec import Spec, SpecError
 
 
 @procedure("one_sample_t", requires=("outcome",))
@@ -51,8 +51,6 @@ def one_sample_t(df: pd.DataFrame, spec: Spec) -> TestResult:
 def indep_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     g = groups(df, spec.variables.outcome, spec.variables.group)
     if len(g) != 2:
-        from ..spec import SpecError
-
         raise SpecError(f"indep_t needs exactly two groups; {spec.variables.group!r} has {len(g)}: {list(g)}")
     (la, a), (lb, b) = g.items()
     res = stats.ttest_ind(a, b, equal_var=False, alternative=spec.alternative)

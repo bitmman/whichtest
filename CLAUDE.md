@@ -117,6 +117,7 @@ Implemented in `spec.py`. What the skill hands to the pipeline. `whichtest resol
 
 Conventions inside procedures:
 - Run the taxonomy's `run` call as the primary and its `cross` call as the secondary; never reimplement what a library provides.
+- Be honest about what a cross-check is. `kind="exact"` against a second library is an independent re-implementation. `kind="approximate"` or `"direction"` against another statistic, assumption or working correlation in the same library is a sensitivity comparison, and the `why` text must say so. The `result.cross_check.method` string names what was compared.
 - Automatic switches are allowed only where the taxonomy's own `run` snippet lists them (2×2 → Fisher on sparse cells; Poisson → negative binomial on overdispersion). Say so in `warnings` and keep the original in `extra`.
 - Anything else that fails a check becomes a `fallback` suggestion, not a silent change of test.
 
@@ -194,6 +195,28 @@ Started 2026-10-12 on the user's go-ahead.
 2. Write `fn(df, spec) -> TestResult` in the right `procedures/` module, decorated `@procedure("<test_id>", requires=(...))`. For a judgment test, also pass `decisions=(...)` naming the keys the human must set.
 3. Fill `checks` (one `CheckResult` per taxonomy check key, in order) and `cross_check` via `compare()`.
 4. Add a spec to `SPECS` in `tests/test_procedures.py`; the parametrized test asserts the cross-check agrees.
+
+## Review log
+
+**2026-10-12, third-party review (`../codex_astra_review.md`, 13 findings, all reproduced and fixed the same day; regression tests in `tests/test_review_findings.py`).** What changed, in the order the review listed them:
+
+1. Binary labels are compared as typed values (`data.binary_labels`): `1.0`, `True` and `1` are the same positive; missing labels are excluded with one joint mask across columns and the exclusion is reported. The test column needs its own `test_positive_label` when it isn't 0/1.
+2. `ordinal_logit` reports statsmodels' own LR test (`llr`, `llr_pvalue`) against the thresholds-only null; the hand-rolled version re-used the full model's thresholds and inflated the statistic 10×.
+3. `poisson_2indep` applies one validity mask across count, exposure and group, validates counts (non-negative integers) and exposures (positive, finite), and reports exclusions.
+4. Kaplan–Meier timepoints and the crossing check evaluate the right-continuous step function (`_surv_at`), not a linear interpolation.
+5. `compare()` treats any non-finite value as disagreement; `direction` compares signs strictly (0 ≠ −1). `TestResult.significant` is `None` and `flagged` is true when p or the statistic is NaN (`inference_failed`).
+6. ICC reports the F test and degrees of freedom of the chosen form (one-way ANOVA for ICC1/ICC1k, two-way otherwise).
+7. ICC confidence intervals are computed for the requested level (McGraw & Wong 1996 formulas, matching pingouin's 95% row to 2 decimals); Aalen–Johansen gets `alpha=1-ci_level`.
+8. GEE accepts `working_correlation="unstructured"` when `variables.time` gives integer visit positions; rows are sorted by subject and time so AR(1) has a defined order.
+9. Competing-risk event codes are normalised once (numeric codes compared as numbers; `0` is censoring and is rejected as the event of interest).
+10. `mnlogit` drops incomplete rows before category coding.
+11. `summary()` prints `inf`/`-inf`/`NA` instead of crashing on one-sided intervals.
+12. A cross-check that cannot run (missing optional library) becomes an explicit failed `CrossCheck` with a warning, so `flagged` and `--strict` see it. scikit-learn moved to the required dependencies because `diag_binary`, `roc_auc` and `delong` use it for the primary computation.
+13. `SpecError` is imported at module scope in `procedures/parametric.py`.
+
+Also from the review: the HTML drift test now parses the `NODES`/`LEAVES` literals in the finder page (via `json5`) and compares every node, option, routing target and test field with `taxonomy.json`; `zip`'s cross-check compares count-part coefficient directions with plain negative binomial instead of forcing agreement.
+
+**Not done yet from the review:** typed, procedure-specific validation of `params` and `decisions` (they are still free dicts); a CI matrix across dependency versions and a base-only install test; an executed example for the confirmatory `factor_sem` branch.
 
 ## Conventions
 

@@ -117,14 +117,34 @@ def lmm(df: pd.DataFrame, spec: Spec) -> TestResult:
 
 
 # ---------------------------------------------------------------------------
+def _time_positions(d: pd.DataFrame, spec: Spec, name: str) -> np.ndarray | None:
+    """Integer visit positions for working correlations that need them (unstructured, AR(1))."""
+    tcol = spec.variables.time
+    if tcol is None:
+        if name == "unstructured":
+            raise SpecError("working_correlation='unstructured' needs variables.time (visit position within subject)")
+        return None
+    tv = pd.to_numeric(d[tcol], errors="coerce")
+    if tv.isna().any():
+        raise SpecError(f"variables.time={tcol!r} must be numeric visit positions")
+    if (tv != np.round(tv)).any():
+        raise SpecError(f"variables.time={tcol!r} must hold integer visit positions (0, 1, 2, ...)")
+    return tv.to_numpy(int)
+
+
 def _gee(df: pd.DataFrame, spec: Spec, family, test: str, exp: bool, prefix: str, offset_col: str | None = None) -> TestResult:
     f = _formula(spec, df)
     subj = spec.variables.subject
     name, cs = _cov_struct(spec.decisions["working_correlation"])
     d = df.copy()
+    sort_by = [subj] + ([spec.variables.time] if spec.variables.time else [])
+    d = d.sort_values(sort_by, kind="stable").reset_index(drop=True)  # AR(1) uses row order within subject
     kw = {}
     if offset_col:
         kw["offset"] = np.log(d[offset_col].to_numpy(float))
+    tpos = _time_positions(d, spec, name)
+    if tpos is not None:
+        kw["time"] = tpos
     res = smf.gee(f, subj, d, family=family, cov_struct=cs, **kw).fit()
     alt_name = "independence" if name != "independence" else "exchangeable"
     alt = smf.gee(f, subj, d, family=family, cov_struct=_CORR[alt_name](), **kw).fit()
@@ -140,7 +160,8 @@ def _gee(df: pd.DataFrame, spec: Spec, family, test: str, exp: bool, prefix: str
         detail="coefficients and robust SEs within 25% relative or 0.05 absolute count as agreement",
     )
     qic = res.qic(scale=res.scale)  # a fixed scale makes QIC comparable across working correlations
-    chk = [_cluster_checks(d[subj]), checks.note("working_correlation", "Working correlation chosen", f"{name}; {cs.summary()}" if hasattr(cs, "summary") else name)]
+    order_note = f"; within-subject order = {spec.variables.time}" if spec.variables.time else ("; within-subject order = row order (set variables.time to be explicit)" if name == "ar1" else "")
+    chk = [_cluster_checks(d[subj]), checks.note("working_correlation", "Working correlation chosen", (f"{name}; {cs.summary()}" if hasattr(cs, "summary") else name) + order_note)]
     return TestResult(
         test=test,
         n={"observations": int(res.nobs), "clusters": int(d[subj].nunique())},

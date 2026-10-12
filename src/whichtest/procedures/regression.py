@@ -208,8 +208,9 @@ def logistic(df: pd.DataFrame, spec: Spec) -> TestResult:
 @procedure("mnlogit", requires=("outcome|formula",))
 def mnlogit(df: pd.DataFrame, spec: Spec) -> TestResult:
     f = _formula(spec, df)
-    d = df.copy()
     yname = spec.variables.outcome or f.split("~")[0].strip()
+    used = [c for c in df.columns if c == yname or c in spec.variables.predictors or (spec.variables.formula and c in spec.variables.formula)]
+    d = df.dropna(subset=used).copy()  # complete cases first: Categorical would code NaN as -1, a bogus category
     cats = pd.Categorical(d[yname])
     d[yname] = cats.codes
     m = smf.mnlogit(f, d).fit(disp=0, maxiter=500)
@@ -262,6 +263,7 @@ def mnlogit(df: pd.DataFrame, spec: Spec) -> TestResult:
         effect_size=Estimate("McFadden pseudo-R²", float(m.prsquared)),
         checks=chk,
         cross_check=cc,
+        warnings=[f"{len(df) - len(d)} row(s) with missing values excluded"] if len(d) < len(df) else [],
         extra={"formula": f, "categories": [str(c) for c in cats.categories], "reference": ref},
     )
 
@@ -332,16 +334,17 @@ def ordinal_logit(df: pd.DataFrame, spec: Spec) -> TestResult:
     po = CheckResult("proportional_odds", "Proportional odds: slopes similar across cut-points", bool(worst < 2.0), worst, None, f"largest cut-point slope spread = {worst:.2f} SE ({worst_name})" if worst_name else "could not fit cut-point models")
     counts = ycodes.value_counts().sort_index()
     sparse = CheckResult("sparse_levels", "Every outcome level has enough observations", bool(counts.min() >= 10), float(counts.min()), None, "counts per level: " + ", ".join(f"{i}: {c}" for i, c in counts.items()))
-    lr = float(2 * (res.llf - res.model.loglike(np.r_[np.zeros(k_x), res.params[k_x:]]))) if k_x else None
-    from scipy import stats as _st
+    # LR test against the thresholds-only model, which statsmodels fits itself (llnull); re-using the
+    # full model's thresholds with zeroed slopes is not the null MLE and inflates the statistic.
+    lr, lr_p = float(res.llr), float(res.llr_pvalue)
 
     return TestResult(
         test="ordinal_logit",
         n=int(len(ycodes)),
         statistic_name="LR χ² (slopes = 0)",
         statistic=lr,
-        p=float(_st.chi2.sf(lr, k_x)) if lr is not None else None,
-        df=float(k_x),
+        p=lr_p,
+        df=float(res.df_model),
         estimates=ests,
         effect_size=Estimate("McFadden pseudo-R²", float(1 - res.llf / res.llnull) if hasattr(res, "llnull") else None),
         checks=[po, sparse],

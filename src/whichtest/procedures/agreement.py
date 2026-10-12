@@ -108,23 +108,18 @@ def fleiss(df: pd.DataFrame, spec: Spec) -> TestResult:
 # ---------------------------------------------------------------------------
 from scipy import stats as _st  # noqa: E402
 
-from ..data import column, paired  # noqa: E402
+from ..data import binary_labels, column, paired  # noqa: E402
 from ..delong import delong_ci, delong_paired  # noqa: E402
 
 
-def _truth(df: pd.DataFrame, spec: Spec, role: str = "outcome") -> np.ndarray:
-    """0/1 truth labels; ``params.positive_label`` names the positive class explicitly."""
-    raw = column(df, getattr(spec.variables, role), role, numeric=False)
-    pos = spec.params.get("positive_label")
-    levels = [l for l in pd.unique(raw) if not pd.isna(l)]
-    if pos is None:
-        if set(levels) <= {0, 1, 0.0, 1.0, True, False}:
-            pos = 1
-        else:
-            raise SpecError(f"set params.positive_label: {getattr(spec.variables, role)!r} has levels {levels}")
-    if pos not in levels and str(pos) not in [str(l) for l in levels]:
-        raise SpecError(f"positive_label {pos!r} not among levels {levels}")
-    return (raw.astype(str) == str(pos)).astype(int)
+def _truth(df: pd.DataFrame, spec: Spec, role: str = "outcome") -> tuple[np.ndarray, np.ndarray]:
+    """0/1 truth labels and validity mask; ``params.positive_label`` names the positive class."""
+    return binary_labels(df, getattr(spec.variables, role), role, spec.params.get("positive_label"), "positive_label")
+
+
+def _dropped_note(n_total: int, keep: np.ndarray) -> list[str]:
+    n_drop = int(n_total - keep.sum())
+    return [f"{n_drop} row(s) with missing values excluded; n = {int(keep.sum())}"] if n_drop else []
 
 
 @procedure("bland_altman", requires=("columns|before|outcome",))
@@ -196,16 +191,11 @@ def bland_altman(df: pd.DataFrame, spec: Spec) -> TestResult:
 
 @procedure("diag_binary", requires=("outcome", "x"))
 def diag_binary(df: pd.DataFrame, spec: Spec) -> TestResult:
-    truth = _truth(df, spec, "outcome")
-    test_raw = column(df, spec.variables.x, "x", numeric=False)
-    pos_t = spec.params.get("test_positive_label")
-    if pos_t is None:
-        t_levels = [l for l in pd.unique(test_raw) if not pd.isna(l)]
-        if set(t_levels) <= {0, 1, 0.0, 1.0, True, False}:
-            pos_t = 1
-        else:
-            raise SpecError(f"set params.test_positive_label: {spec.variables.x!r} has levels {t_levels}")
-    test = (test_raw.astype(str) == str(pos_t)).astype(int)
+    truth, ok_t = _truth(df, spec, "outcome")
+    test, ok_x = binary_labels(df, spec.variables.x, "x", spec.params.get("test_positive_label"), "test_positive_label")
+    keep = ok_t & ok_x
+    notes = _dropped_note(len(truth), keep)
+    truth, test = truth[keep], test[keep]
     from sklearn.metrics import confusion_matrix
     from statsmodels.stats.proportion import proportion_confint
 
@@ -259,15 +249,17 @@ def diag_binary(df: pd.DataFrame, spec: Spec) -> TestResult:
             checks.manual("prevalence", "PPV and NPV depend on prevalence. Skip them in case–control samples", f"sample prevalence = {prev:.1%}"),
         ],
         cross_check=cc,
-        extra={"table": {"tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn)}, "positive_label": spec.params.get("positive_label", 1)},
+        warnings=notes,
+        extra={"table": {"tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn)}, "positive_label": spec.params.get("positive_label", 1), "test_positive_label": spec.params.get("test_positive_label", 1)},
     )
 
 
 @procedure("roc_auc", requires=("outcome", "x"))
 def roc_auc(df: pd.DataFrame, spec: Spec) -> TestResult:
-    truth = _truth(df, spec, "outcome")
+    truth, ok_t = _truth(df, spec, "outcome")
     score = column(df, spec.variables.x, "x")
-    keep = ~np.isnan(score)
+    keep = ok_t & ~np.isnan(score)
+    notes = _dropped_note(len(truth), keep)
     truth, score = truth[keep], score[keep]
     if truth.sum() == 0 or truth.sum() == len(truth):
         raise SpecError("roc_auc needs both positive and negative cases")
@@ -288,7 +280,7 @@ def roc_auc(df: pd.DataFrame, spec: Spec) -> TestResult:
     fpr, tpr, thr = roc_curve(truth, score)
     ests = [Estimate("AUC", auc, ci, spec.ci_level, "DeLong")]
     thr_fixed = spec.params.get("threshold")
-    warnings = []
+    warnings = list(notes)
     if thr_fixed is not None:
         pred = (score >= float(thr_fixed)).astype(int)
         tp, fn = int(((pred == 1) & (truth == 1)).sum()), int(((pred == 0) & (truth == 1)).sum())
@@ -323,13 +315,14 @@ def roc_auc(df: pd.DataFrame, spec: Spec) -> TestResult:
 
 @procedure("delong", requires=("outcome", "columns"))
 def delong(df: pd.DataFrame, spec: Spec) -> TestResult:
-    truth = _truth(df, spec, "outcome")
+    truth, ok_t = _truth(df, spec, "outcome")
     cols = spec.variables.columns or []
     if len(cols) != 2:
         raise SpecError("delong needs variables.columns = [score_a, score_b]")
     a = column(df, cols[0], "columns[0]")
     b = column(df, cols[1], "columns[1]")
-    keep = ~(np.isnan(a) | np.isnan(b))
+    keep = ok_t & ~(np.isnan(a) | np.isnan(b))
+    notes = _dropped_note(len(truth), keep)
     truth, a, b = truth[keep], a[keep], b[keep]
     res = delong_paired(truth, a, b, spec.ci_level)
     # cross-check: paired bootstrap of the AUC difference
@@ -372,6 +365,7 @@ def delong(df: pd.DataFrame, spec: Spec) -> TestResult:
             checks.manual("not_nested", "Not a model compared with the same model plus one marker", "for nested models test the added coefficient instead"),
         ],
         cross_check=cc,
+        warnings=notes,
         extra={"delong_se": res["se"], "bootstrap_se": boot_se},
     )
 
@@ -428,8 +422,34 @@ def icc(df: pd.DataFrame, spec: Spec) -> TestResult:
         "ICC3k": (msr - mse) / msr,
     }
     value = float(manual[form])
-    ci = None
+    # F test, degrees of freedom and CI for the chosen form (McGraw & Wong 1996; same formulas as R psych)
+    a = 1 - spec.ci_level
+    from scipy.stats import f as _f
+
+    one_way = form in ("ICC1", "ICC1k")
+    if one_way:
+        F, df1, df2 = msr1 / msw, n - 1, n * (k - 1)
+    else:
+        F, df1, df2 = msr / mse, n - 1, (n - 1) * (k - 1)
+    p_f = float(_f.sf(F, df1, df2))
+    FL, FU = F / _f.ppf(1 - a / 2, df1, df2), F * _f.ppf(1 - a / 2, df2, df1)
+    if form in ("ICC1", "ICC3"):
+        ci = ((FL - 1) / (FL + k - 1), (FU - 1) / (FU + k - 1))
+    elif form in ("ICC1k", "ICC3k"):
+        ci = (1 - 1 / FL, 1 - 1 / FU)
+    else:  # ICC2 / ICC2k
+        icc2 = manual["ICC2"]
+        Fj = msc / mse
+        vn = (k - 1) * (n - 1) * (k * icc2 * Fj + n * (1 + (k - 1) * icc2) - k * icc2) ** 2
+        vd = (n - 1) * k**2 * icc2**2 * Fj**2 + (n * (1 + (k - 1) * icc2) - k * icc2) ** 2
+        v = vn / vd
+        F3U, F3L = _f.ppf(1 - a / 2, n - 1, v), _f.ppf(1 - a / 2, v, n - 1)
+        L3 = n * (msr - F3U * mse) / (F3U * (k * msc + (k * n - k - n) * mse) + n * msr)
+        U3 = n * (F3L * msr - mse) / (k * msc + (k * n - k - n) * mse + n * F3L * msr)
+        ci = (L3, U3) if form == "ICC2" else (L3 * k / (1 + L3 * (k - 1)), U3 * k / (1 + U3 * (k - 1)))
+    ci = (float(ci[0]), float(ci[1]))
     cc = None
+    extra_all = dict(manual)
     try:
         import pingouin as pg
 
@@ -437,20 +457,23 @@ def icc(df: pd.DataFrame, spec: Spec) -> TestResult:
         # pingouin labels the rows ICC(1,1), ICC(A,1), ICC(C,1), ICC(1,k), ICC(A,k), ICC(C,k) in a fixed order
         pg_pos = {"ICC1": 0, "ICC2": 1, "ICC3": 2, "ICC1k": 3, "ICC2k": 4, "ICC3k": 5}
         row = res.iloc[pg_pos[form]]
-        ci_col = [c for c in res.columns if c.startswith("CI")][0]
-        ci_raw = row[ci_col]
-        ci = (float(ci_raw[0]), float(ci_raw[1]))
+        primary = {"icc": value, "F": F, "df1": float(df1), "df2": float(df2), "p": p_f}
+        secondary = {"icc": float(row["ICC"]), "F": float(row["F"]), "df1": float(row["df1"]), "df2": float(row["df2"]), "p": float(row["pval"])}
+        if abs(spec.ci_level - 0.95) < 1e-9:  # pingouin only reports a 95% interval, rounded to 2 decimals
+            ci_col = [c for c in res.columns if c.startswith("CI")][0]
+            primary.update({"ci_low": round(ci[0], 2), "ci_high": round(ci[1], 2)})
+            secondary.update({"ci_low": float(row[ci_col][0]), "ci_high": float(row[ci_col][1])})
         cc = compare(
-            "two-way ANOVA mean squares in the Shrout–Fleiss formula",
+            "pingouin.intraclass_corr",
             "Plug the mean squares into the Shrout–Fleiss formula. It should reproduce pingouin's row.",
-            {"icc": float(row["ICC"])},
-            {"icc": value},
+            primary,
+            secondary,
             rtol=1e-6,
+            atol=0.011,
         )
-        value = float(row["ICC"])
         extra_all = {t: float(res.iloc[i]["ICC"]) for t, i in pg_pos.items()}
     except ImportError:
-        extra_all = manual
+        pass
     chk = [
         checks.note("icc_form", "Form chosen: one-way or two-way, random or fixed raters, agreement or consistency, single or average", _ICC_DESC[form] + "; chosen by the user"),
         checks.shapiro(np.asarray(ols.resid), "residual_normality", "Residuals roughly normal", spec.alpha),
@@ -461,11 +484,11 @@ def icc(df: pd.DataFrame, spec: Spec) -> TestResult:
     return TestResult(
         test="icc",
         n={"targets": int(n), "raters": int(k)},
-        statistic_name="F (targets)",
-        statistic=float(tab.loc["C(target)", "F"]),
-        p=float(tab.loc["C(target)", "PR(>F)"]),
-        df=(float(tab.loc["C(target)", "df"]), float(tab.loc["Residual", "df"])),
-        effect_size=Estimate(_ICC_DESC[form].split(":")[0], value, ci, spec.ci_level if ci else None, _ICC_DESC[form].split(": ")[1]),
+        statistic_name=f"F (targets, {'one-way' if one_way else 'two-way'} ANOVA)",
+        statistic=float(F),
+        p=p_f,
+        df=(float(df1), float(df2)),
+        effect_size=Estimate(_ICC_DESC[form].split(":")[0], value, ci, spec.ci_level, _ICC_DESC[form].split(": ")[1]),
         estimates=[Estimate(f"{t} (not chosen)", v) for t, v in extra_all.items() if t != form],
         checks=chk,
         cross_check=cc,

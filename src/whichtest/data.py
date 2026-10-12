@@ -8,7 +8,7 @@ import pandas as pd
 
 from .spec import Spec, SpecError
 
-__all__ = ["column", "groups", "paired", "blocks", "contingency_table", "need"]
+__all__ = ["column", "groups", "paired", "blocks", "contingency_table", "need", "binary_labels"]
 
 
 def need(spec: Spec, *roles: str) -> None:
@@ -135,3 +135,40 @@ def contingency_table(df: pd.DataFrame | None, spec: Spec) -> tuple[np.ndarray, 
             raise SpecError(f"column {c!r} (variables.{r}) is not in the data")
     ct = pd.crosstab(df[v.row], df[v.col])
     return ct.to_numpy(dtype=float), list(ct.index), list(ct.columns)
+
+
+def binary_labels(df: pd.DataFrame, name: str | None, role: str, positive: Any = None, param: str = "positive_label") -> tuple[np.ndarray, np.ndarray]:
+    """0/1 labels and a validity mask for a binary column, comparing typed values, not strings.
+
+    ``positive`` names the positive class. When it is ``None`` the column must be 0/1 (ints,
+    floats or booleans); anything else must say which level is positive via ``params[param]``.
+    Missing values are *not* negatives: they are ``False`` in the returned mask and the caller
+    must filter every column with one joint mask.
+    """
+    raw = column(df, name, role, numeric=False)
+    valid = ~pd.isna(raw)
+    vals = raw[valid]
+    levels = list(pd.unique(vals))
+    numeric = all(isinstance(v, (int, float, np.integer, np.floating, bool, np.bool_)) for v in levels)
+    if positive is None:
+        if numeric and {float(v) for v in levels} <= {0.0, 1.0}:
+            positive = 1
+        else:
+            raise SpecError(f"set params.{param}: {name!r} has levels {levels}")
+    if numeric:
+        try:
+            pos_f = float(positive)
+        except (TypeError, ValueError):
+            raise SpecError(f"params.{param}={positive!r} is not a level of numeric column {name!r} ({levels})") from None
+        if pos_f not in {float(v) for v in levels}:
+            raise SpecError(f"params.{param}={positive!r} is not among the levels of {name!r}: {levels}")
+        lab = (vals.astype(float) == pos_f).astype(int)
+    else:
+        if positive not in levels and str(positive) not in [str(v) for v in levels]:
+            raise SpecError(f"params.{param}={positive!r} is not among the levels of {name!r}: {levels}")
+        lab = (vals.astype(str) == str(positive)).astype(int)
+    if len(levels) > 2:
+        raise SpecError(f"{name!r} has {len(levels)} levels; a binary column was expected: {levels}")
+    out = np.zeros(len(raw), dtype=int)
+    out[valid] = lab
+    return out, valid

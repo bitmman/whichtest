@@ -20,21 +20,32 @@ from .regression import _coef_estimates, _formula
 def poisson_2indep(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     p = spec.params
     v = spec.variables
+    n_drop = 0
     if all(k in p for k in ("count1", "exposure1", "count2", "exposure2")):
         c1, e1, c2, e2 = int(p["count1"]), float(p["exposure1"]), int(p["count2"]), float(p["exposure2"])
+        if min(c1, c2) < 0 or min(e1, e2) <= 0:
+            raise SpecError("counts must be non-negative and exposures positive")
         labels = ("1", "2")
     elif df is not None and v.outcome and v.group:
         y = column(df, v.outcome, "outcome")
         g = column(df, v.group, "group", numeric=False)
         ex = column(df, v.exposure, "exposure") if v.exposure else np.ones(len(y))
-        labs = [l for l in pd.unique(g) if not pd.isna(l)]
+        keep = ~np.isnan(y) & ~np.isnan(ex) & ~pd.isna(g)  # one joint mask: a row with any missing part is out
+        n_drop = int((~keep).sum())
+        y, g, ex = y[keep], g[keep], ex[keep]
+        if (y < 0).any() or (y != np.round(y)).any():
+            raise SpecError(f"{v.outcome!r} must hold non-negative integer counts")
+        if (ex <= 0).any() or not np.isfinite(ex).all():
+            raise SpecError(f"{v.exposure!r} must hold positive finite exposures")
+        labs = [l for l in pd.unique(g)]
         if len(labs) != 2:
             raise SpecError(f"poisson_2indep needs exactly two groups; found {labs}")
-        c1, e1 = int(np.nansum(y[g == labs[0]])), float(np.nansum(ex[g == labs[0]]))
-        c2, e2 = int(np.nansum(y[g == labs[1]])), float(np.nansum(ex[g == labs[1]]))
+        c1, e1 = int(y[g == labs[0]].sum()), float(ex[g == labs[0]].sum())
+        c2, e2 = int(y[g == labs[1]].sum()), float(ex[g == labs[1]].sum())
         labels = (str(labs[0]), str(labs[1]))
     else:
         raise SpecError("poisson_2indep needs params.count1/exposure1/count2/exposure2, or variables.outcome + group (+ exposure)")
+    notes = [f"{n_drop} row(s) with a missing count, exposure or group excluded"] if n_drop else []
     alt = {"two-sided": "two-sided", "less": "smaller", "greater": "larger"}[spec.alternative]
     r = test_poisson_2indep(c1, e1, c2, e2, method="score", alternative=alt)
     r2 = test_poisson_2indep(c1, e1, c2, e2, method="exact-cond", alternative=alt)
@@ -61,6 +72,7 @@ def poisson_2indep(df: pd.DataFrame | None, spec: Spec) -> TestResult:
         effect_size=Estimate(f"rate ratio ({labels[0]} / {labels[1]})", float(rate1 / rate2) if rate2 > 0 else None, (float(lo), float(hi)), spec.ci_level),
         checks=[checks.manual("event_independence", "Events occur independently at a constant rate within each group")],
         cross_check=cc,
+        warnings=notes,
     )
 
 
@@ -170,18 +182,18 @@ def zip_model(df: pd.DataFrame, spec: Spec) -> TestResult:
         res, label = zp, "zero-inflated Poisson"
     nb = sm.NegativeBinomial(y, X, **kw).fit(disp=0, maxiter=500)
     pois = sm.Poisson(y, X, **kw).fit(disp=0, maxiter=500)
-    cc = compare(
-        "plain negative binomial AIC",
-        "If the zero-inflated model doesn't clearly beat plain negative binomial, the extra zeros may just be overdispersion.",
-        {"aic_zero_inflated": float(res.aic)},
-        {"aic_zero_inflated": float(nb.aic)},
-        kind="exact",
-        rtol=0.0,
-        atol=float("inf"),
-        detail=f"ΔAIC (NB − ZI) = {float(nb.aic - res.aic):.2f}; the beats_nb check below judges it",
-    )
-    cc.agrees = True  # informational: the comparison is reported by the check, not a disagreement
     delta = float(nb.aic - res.aic)
+    # cross-check: the count-part coefficients should point the same way as a plain NB fit; the AIC
+    # comparison the taxonomy asks for is reported in the beats_nb check, not as an agreement rule
+    count_names = [nm for nm in res.params.index if not nm.startswith("inflate_") and nm != "alpha" and nm != "const"]
+    cc = compare(
+        "plain negative binomial (count-part coefficient directions; AIC in the beats_nb check)",
+        "If the zero-inflated model doesn't clearly beat plain negative binomial, the extra zeros may just be overdispersion.",
+        {f"direction[{nm}]": float(res.params[nm]) for nm in count_names},
+        {f"direction[{nm}]": float(nb.params[nm]) for nm in count_names},
+        kind="direction",
+        detail=f"ΔAIC (NB − ZI) = {delta:.2f}",
+    )
     obs0 = float((y == 0).mean())
     pred0_nb = float(np.mean(nb.predict(which="prob", y_values=[0]))) if hasattr(nb, "predict") else float("nan")
     try:

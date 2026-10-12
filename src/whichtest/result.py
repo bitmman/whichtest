@@ -13,7 +13,7 @@ __all__ = ["CheckResult", "Estimate", "Comparison", "CrossCheck", "TestResult", 
 
 def _clean(v: Any) -> Any:
     """Make values JSON-friendly."""
-    if isinstance(v, (np.floating, np.integer)):
+    if isinstance(v, (np.floating, np.integer, np.bool_)):
         v = v.item()
     if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
         return None
@@ -104,7 +104,15 @@ class TestResult:
     # ------------------------------------------------------------------
     @property
     def significant(self) -> bool | None:
-        return None if self.p is None else bool(self.p < self.alpha)
+        """None when there is no p-value or inference failed (NaN p)."""
+        if self.p is None or not math.isfinite(self.p):
+            return None
+        return bool(self.p < self.alpha)
+
+    @property
+    def inference_failed(self) -> bool:
+        """A p-value or statistic that came back NaN/inf: the test ran but produced nothing usable."""
+        return any(v is not None and isinstance(v, float) and not math.isfinite(v) for v in (self.p, self.statistic))
 
     @property
     def failed_checks(self) -> list[CheckResult]:
@@ -112,8 +120,14 @@ class TestResult:
 
     @property
     def flagged(self) -> bool:
-        """True when a human should look: cross-check disagreement or failed assumptions."""
-        return (self.cross_check is not None and not self.cross_check.agrees) or bool(self.failed_checks)
+        """True when a human should look: no usable cross-check, cross-check disagreement, failed
+        assumptions, or inference that produced non-finite numbers."""
+        return (
+            self.cross_check is None
+            or not self.cross_check.agrees
+            or bool(self.failed_checks)
+            or self.inference_failed
+        )
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -144,7 +158,11 @@ class TestResult:
                 mark = {True: "ok  ", False: "FAIL", None: "?   "}[c.passed]
                 extra = f" (p = {_fmt_p(c.p)})" if c.p is not None else ""
                 lines.append(f"    [{mark}] {c.key}: {c.text}{extra}{' — ' + c.detail if c.detail else ''}")
-        if self.cross_check:
+        if self.inference_failed:
+            lines.append("  inference FAILED: statistic or p-value is not finite")
+        if self.cross_check is None:
+            lines.append("  cross-check: NOT RUN")
+        else:
             cc = self.cross_check
             lines.append(f"  cross-check ({cc.kind}) via {cc.method}: {'AGREES' if cc.agrees else 'DISAGREES'}")
             for cmp in cc.comparisons:
@@ -171,13 +189,17 @@ def _fmt(v: Any) -> str:
         f = float(v)
     except (TypeError, ValueError):
         return str(v)
+    if math.isnan(f):
+        return "NA"
+    if math.isinf(f):
+        return "-inf" if f < 0 else "inf"
     if f == int(f) and abs(f) < 1e6:
         return str(int(f))
     return f"{f:.4g}"
 
 
 def _fmt_p(p: float | None) -> str:
-    if p is None:
+    if p is None or not math.isfinite(p):
         return "NA"
     return "<0.0001" if p < 1e-4 else f"{p:.4f}"
 
@@ -221,9 +243,12 @@ def compare(
             comps.append(Comparison(q, a, b, False, "missing value"))
             continue
         a, b = float(a), float(b)
+        if not (math.isfinite(a) and math.isfinite(b)):
+            comps.append(Comparison(q, a, b, False, "non-finite value"))
+            continue
         if kind == "direction" and q.startswith("direction"):
-            ok = (a > 0) == (b > 0) or (a == 0 and b == 0)
-            rule = "same sign"
+            ok = bool(np.sign(a) == np.sign(b))
+            rule = "same sign (zero counts as its own sign)"
         elif kind == "direction" and q.startswith("p"):
             ok, rule = True, "reported only"
         elif kind == "approximate" and q.startswith("p"):

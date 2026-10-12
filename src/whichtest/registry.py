@@ -111,6 +111,17 @@ def run(spec: Spec | dict[str, Any], data: pd.DataFrame | None = None, taxonomy:
     result.name = result.name or info.name
     result.status = info.status
     result.alpha = spec.alpha
+    if result.cross_check is None:
+        from .result import CrossCheck
+
+        result.cross_check = CrossCheck(
+            method=info.xcall,
+            why=info.cross_why,
+            kind="exact",
+            agrees=False,
+            detail="NOT RUN: the cross-check library is not installed (pip install 'whichtest[cross]'); the result is unverified",
+        )
+        result.warnings.append("cross-check not run: optional dependency missing; result flagged as unverified")
     if info.status == "judgment":
         # every judgment result carries the human decisions it was run with
         result.extra["decisions"] = dict(spec.decisions)

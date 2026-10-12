@@ -47,14 +47,36 @@ def test_multi_path_tests():
     assert len(t.paths_to("chi_sq_indep")) == 3
 
 
-def test_html_and_json_do_not_drift():
-    """The finder page embeds the same taxonomy; the test ids and statuses must match."""
-    html = (ROOT / "stat-test-finder.html").read_text(encoding="utf-8")
-    t = load_taxonomy()
-    import re
+def _embedded(html: str, name: str):
+    """Parse the JavaScript object literal assigned to ``const <name>`` in the finder page."""
+    import json5
 
-    for tid, info in t.tests.items():
-        assert re.search(rf"\b{tid}\b", html), f"{tid} missing from stat-test-finder.html"
-        assert info.name.replace("'", "\\'") in html or info.name in html, f"{tid} name differs in stat-test-finder.html"
+    i = html.index(f"const {name} = ") + len(f"const {name} = ")
+    depth, j = 0, i
+    while True:
+        c = html[j]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return json5.loads(html[i : j + 1])
+
+
+def test_html_and_json_do_not_drift():
+    """The finder page embeds the same tree: every node, option, routing target and test entry must match."""
+    html = (ROOT / "stat-test-finder.html").read_text(encoding="utf-8")
     raw = json.loads((ROOT / "taxonomy.json").read_text(encoding="utf-8"))
-    assert set(raw["tests"]) == set(t.tests)
+    nodes, leaves = _embedded(html, "NODES"), _embedded(html, "LEAVES")
+    assert nodes.keys() == raw["nodes"].keys()
+    for nid, n in raw["nodes"].items():
+        h = nodes[nid]
+        assert (h["key"], h["q"]) == (n["key"], n["q"]), nid
+        assert [(o["val"], o["to"]) for o in h["opts"]] == [(o["val"], o["to"]) for o in n["opts"]], nid
+    assert leaves.keys() == raw["tests"].keys()
+    for tid, t in raw["tests"].items():
+        h = leaves[tid]
+        for field in ("name", "status", "family", "run", "call", "xcall", "checks", "fb", "cross", "post", "watch", "report"):
+            assert h.get(field) == t.get(field), f"{tid}.{field} differs between taxonomy.json and stat-test-finder.html"

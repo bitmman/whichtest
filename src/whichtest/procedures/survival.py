@@ -12,6 +12,19 @@ from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 
 
+def _surv_at(sf: SurvfuncRight, t: float) -> float:
+    """Right-continuous Kaplan–Meier step function evaluated at ``t`` (1 before the first event)."""
+    times = np.asarray(sf.surv_times, float)
+    if len(times) == 0:
+        return 1.0
+    i = int(np.searchsorted(times, t, side="right")) - 1
+    return 1.0 if i < 0 else float(sf.surv_prob[i])
+
+
+def _surv_curve(sf: SurvfuncRight, grid: np.ndarray) -> np.ndarray:
+    return np.array([_surv_at(sf, t) for t in grid])
+
+
 @procedure("km_logrank", requires=("time", "event", "group"))
 def km_logrank(df: pd.DataFrame, spec: Spec) -> TestResult:
     v = spec.variables
@@ -60,14 +73,13 @@ def km_logrank(df: pd.DataFrame, spec: Spec) -> TestResult:
             ci = None
         ests.append(Estimate(f"median survival[{lab}]", None if (med is None or not np.isfinite(med)) else float(med), ci, spec.ci_level if ci else None, f"{int(e[mask].sum())} events / {int(mask.sum())}"))
         for tp in timepoints:
-            s = float(np.interp(tp, sf.surv_times, sf.surv_prob, left=1.0)) if len(sf.surv_times) else 1.0
-            ests.append(Estimate(f"S({tp:g})[{lab}]", s))
+            ests.append(Estimate(f"S({tp:g})[{lab}]", _surv_at(sf, float(tp)), note="Kaplan–Meier step function"))
     # crossing curves: compare the ordering of the two curves early vs late
     crossing = checks.manual("crossing_curves", "Survival curves don't cross (log-rank loses power if they do)", "plot the curves")
     if len(labels) == 2:
         sfs = [SurvfuncRight(t[g == l], e[g == l]) for l in labels]
         grid = np.unique(t)
-        diffs = np.interp(grid, sfs[0].surv_times, sfs[0].surv_prob, left=1.0) - np.interp(grid, sfs[1].surv_times, sfs[1].surv_prob, left=1.0)
+        diffs = _surv_curve(sfs[0], grid) - _surv_curve(sfs[1], grid)
         # a crossing worth worrying about: the curves separate by > 0.1 in both directions
         margin = float(spec.params.get("crossing_margin", 0.1))
         crosses = bool(diffs.max() > margin and diffs.min() < -margin)
@@ -184,24 +196,47 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
     eoi = spec.decisions["event_of_interest"]
     d = df.dropna(subset=[v.time, v.event]).copy()
     t = d[v.time].to_numpy(float)
-    et = d[v.event].to_numpy()
-    if str(eoi) not in {str(x) for x in np.unique(et)}:
-        raise SpecError(f"event_of_interest {eoi!r} not among event codes {np.unique(et).tolist()} (0 = censored)")
-    is_eoi = (et.astype(str) == str(eoi)).astype(int)
-    any_event = (et.astype(str) != "0").astype(int)
+    # normalise event codes once: numeric codes compare as numbers (0 = censored), others as strings
+    raw_et = d[v.event].to_numpy()
+    numeric_codes = pd.api.types.is_numeric_dtype(d[v.event])
+    if numeric_codes:
+        et_num = raw_et.astype(float)
+        if (et_num != np.round(et_num)).any():
+            raise SpecError(f"{v.event!r} must hold integer event codes (0 = censored)")
+        codes = et_num.astype(int)
+        censor = 0
+        try:
+            eoi_code = int(float(eoi))
+        except (TypeError, ValueError):
+            raise SpecError(f"event_of_interest {eoi!r} is not a numeric code; {v.event!r} holds {np.unique(codes).tolist()}") from None
+    else:
+        codes = raw_et.astype(str)
+        censor = str(spec.params.get("censor_code", "0"))
+        eoi_code = str(eoi)
+    if eoi_code == censor:
+        raise SpecError(f"event_of_interest {eoi!r} is the censoring code")
+    if eoi_code not in set(codes.tolist()):
+        raise SpecError(f"event_of_interest {eoi!r} not among event codes {np.unique(codes).tolist()} ({censor!r} = censored)")
+    is_eoi = (codes == eoi_code).astype(int)
+    any_event = (codes != censor).astype(int)
     n_eoi, n_comp, n_cens = int(is_eoi.sum()), int(any_event.sum() - is_eoi.sum()), int((any_event == 0).sum())
+    extra_events = {"of_interest": n_eoi, "competing": n_comp, "censored": n_cens}
     naive = SurvfuncRight(t, is_eoi)
     naive_ci_end = float(1 - naive.surv_prob[-1]) if len(naive.surv_prob) else 0.0
     timepoints = list(spec.params.get("timepoints", []))
     ests: list[Estimate] = []
     cc = None
-    extra: dict = {"events": {"of_interest": n_eoi, "competing": n_comp, "censored": n_cens}}
+    extra: dict = {"events": extra_events}
     try:
         from lifelines import AalenJohansenFitter
 
-        codes = pd.Categorical(et.astype(str)).codes if not np.issubdtype(et.dtype, np.number) else et.astype(int)
-        eoi_code = int(eoi) if np.issubdtype(et.dtype, np.number) else int(pd.Categorical(et.astype(str)).categories.get_loc(str(eoi)))
-        ajf = AalenJohansenFitter(calculate_variance=True, seed=int(spec.params.get("seed", 0))).fit(t, codes, event_of_interest=eoi_code)
+        if numeric_codes:
+            aj_codes, aj_eoi = codes, eoi_code
+        else:  # lifelines needs integer codes with 0 = censored
+            others = sorted(set(codes.tolist()) - {censor})
+            mapping = {censor: 0, **{c: i + 1 for i, c in enumerate(others)}}
+            aj_codes, aj_eoi = np.array([mapping[c] for c in codes]), mapping[eoi_code]
+        ajf = AalenJohansenFitter(alpha=1 - spec.ci_level, calculate_variance=True, seed=int(spec.params.get("seed", 0))).fit(t, aj_codes, event_of_interest=aj_eoi)
         cif = ajf.cumulative_density_.iloc[:, 0]
         aj_end = float(cif.iloc[-1])
         cc = compare(
@@ -237,7 +272,7 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
             cat = set(v.categorical)
             rhs = " + ".join(f"C({p_})" if (p_ in cat or not pd.api.types.is_numeric_dtype(d[p_])) else p_ for p_ in v.predictors)
         dd = d.dropna(subset=list(v.predictors)).copy()
-        status = (dd[v.event].astype(str) == str(eoi)).astype(int).to_numpy()
+        status = is_eoi[d.index.get_indexer(dd.index)]
         res = smf.phreg(f"{v.time} ~ {rhs}", dd, status=status, ties="efron").fit()
         names = list(res.model.exog_names)
         ci = res.conf_int(alpha=1 - spec.ci_level)
@@ -250,7 +285,7 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
     chk = [checks.note("estimand", "Estimand chosen: cause-specific hazards for etiology, cumulative incidence for prognosis", f"{estimand}; event of interest = {eoi!r}; chosen by the user")]
     return TestResult(
         test="competing",
-        n={"subjects": int(len(d)), "events_of_interest": n_eoi, "competing_events": n_comp},
+        n={"subjects": int(len(d)), "events_of_interest": n_eoi, "competing_events": n_comp, "censored": n_cens},
         statistic_name=stat_name,
         statistic=stat,
         p=p,
