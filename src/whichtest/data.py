@@ -8,7 +8,9 @@ import pandas as pd
 
 from .spec import Spec, SpecError
 
-__all__ = ["column", "groups", "paired", "blocks", "contingency_table", "need", "binary_labels", "validate_counts", "int_param", "positive_float_param", "formula_columns"]
+__all__ = ["column", "groups", "paired", "blocks", "contingency_table", "need", "binary_labels", "validate_counts", "int_param", "positive_float_param", "float_param", "bool_param", "formula_columns"]
+
+_REQUIRED = object()
 
 
 def need(spec: Spec, *roles: str) -> None:
@@ -143,10 +145,14 @@ def validate_counts(values: Any, what: str, allow_zero: bool = True) -> np.ndarr
     return arr
 
 
-def int_param(params: dict, name: str, minimum: int = 0) -> int:
+def int_param(params: dict, name: str, minimum: int = 0, default: Any = _REQUIRED) -> int:
     """An integer-valued, finite parameter ≥ ``minimum``; rejects 2.8, -0.5, inf and NaN before casting."""
-    if name not in params:
-        raise SpecError(f"params.{name} is required")
+    if name not in params or params[name] is None:
+        if default is _REQUIRED:
+            raise SpecError(f"params.{name} is required")
+        return int(default)
+    if isinstance(params[name], (bool, np.bool_, str)):
+        raise SpecError(f"params.{name} must be an integer; got {params[name]!r}")
     arr = validate_counts([params[name]], f"params.{name}")
     v = int(arr[0])
     if v < minimum:
@@ -164,6 +170,36 @@ def positive_float_param(params: dict, name: str) -> float:
     if not np.isfinite(v) or v <= 0:
         raise SpecError(f"params.{name} must be a positive finite number")
     return v
+
+
+def float_param(params: dict, name: str, default: Any = _REQUIRED, lo: float | None = None, hi: float | None = None, open_interval: bool = False) -> float:
+    """A finite numeric parameter, optionally within [lo, hi] (or (lo, hi) when ``open_interval``)."""
+    if name not in params or params[name] is None:
+        if default is _REQUIRED:
+            raise SpecError(f"params.{name} is required")
+        return float(default)
+    v = params[name]
+    if isinstance(v, (bool, np.bool_, str)) or not isinstance(v, (int, float, np.integer, np.floating)):
+        raise SpecError(f"params.{name} must be a number; got {v!r}")
+    f = float(v)
+    if not np.isfinite(f):
+        raise SpecError(f"params.{name} must be finite; got {v!r}")
+    below = lo is not None and (f <= lo if open_interval else f < lo)
+    above = hi is not None and (f >= hi if open_interval else f > hi)
+    if below or above:
+        br = ("(", ")") if open_interval else ("[", "]")
+        raise SpecError(f"params.{name} must be in {br[0]}{lo}, {hi}{br[1]}; got {v!r}")
+    return f
+
+
+def bool_param(params: dict, name: str, default: bool) -> bool:
+    """A JSON boolean; ``"false"``, ``0`` and other truthy/falsy stand-ins are rejected, not coerced."""
+    if name not in params or params[name] is None:
+        return bool(default)
+    v = params[name]
+    if not isinstance(v, (bool, np.bool_)):
+        raise SpecError(f"params.{name} must be true or false; got {v!r}")
+    return bool(v)
 
 
 def contingency_table(df: pd.DataFrame | None, spec: Spec) -> tuple[np.ndarray, list[Any], list[Any]]:

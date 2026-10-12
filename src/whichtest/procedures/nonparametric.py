@@ -6,7 +6,7 @@ import pandas as pd
 from scipy import stats
 
 from .. import checks, effects
-from ..data import blocks, column, groups, paired
+from ..data import blocks, column, groups, paired, float_param
 from ..registry import procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
@@ -75,7 +75,7 @@ def wilcoxon_signed(df: pd.DataFrame, spec: Spec) -> TestResult:
 def one_sample_wilcoxon(df: pd.DataFrame, spec: Spec) -> TestResult:
     x = column(df, spec.variables.outcome, "outcome")
     x = x[~np.isnan(x)]
-    m0 = float(spec.params.get("m0", spec.params.get("mu0", 0.0)))
+    m0 = float_param(spec.params, "m0" if "m0" in spec.params else "mu0", default=0.0)
     r = _wilcoxon_core(x - m0, spec, "one_sample_wilcoxon", f"(x − {m0:g})")
     r.estimates[0].name = f"Hodges–Lehmann pseudo-median of x − {m0:g}"
     return r

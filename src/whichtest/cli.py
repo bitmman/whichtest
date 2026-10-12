@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import __version__
-from .registry import available, run
+from .registry import PROCEDURES, Procedure, available, preflight, run
 from .spec import Design, Spec, SpecError
 from .taxonomy import TaxonomyError, load_taxonomy
 
@@ -93,8 +93,21 @@ def cmd_show(args: argparse.Namespace) -> int:
         if proc.requires:
             print(f"  variables required: {', '.join(proc.requires)}")
         if proc.decisions:
-            print(f"  decisions required (spec.decisions): {', '.join(proc.decisions)}")
+            print("  decisions required (spec.decisions), each a human choice the pipeline will not make:")
+            for dcs in proc.decisions:
+                print(f"    - {dcs.describe()}")
     return 0
+
+
+def decision_summary(proc: Procedure) -> str:
+    """``re_formula, reml`` or ``approach; n_factors, rotation (when approach=exploratory); ...``."""
+    groups: dict[tuple[str, str] | None, list[str]] = {}
+    for d in proc.decisions:
+        groups.setdefault(d.when, []).append(d.key)
+    parts = []
+    for when, keys in groups.items():
+        parts.append(", ".join(keys) + (f" (when {when[0]}={when[1]})" if when else ""))
+    return "; ".join(parts)
 
 
 def _spec_template(spec: Spec) -> dict:
@@ -161,7 +174,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
 def render_tree(tax=None) -> str:
     """The question tree as Markdown: one line per option, leaves name the test and its status."""
-    from .registry import PROCEDURES, _load
+    from .registry import _load
 
     _load()
     tax = tax or load_taxonomy()
@@ -174,8 +187,8 @@ def render_tree(tax=None) -> str:
         for o in q.options:
             if o.is_leaf:
                 t = tax.test(o.test_id)
-                dec = PROCEDURES.get(t.id).decisions if t.id in PROCEDURES else ()
-                extra = f"; decisions: {', '.join(dec)}" if dec else ""
+                dec = decision_summary(PROCEDURES[t.id]) if t.id in PROCEDURES and PROCEDURES[t.id].decisions else ""
+                extra = f"; decisions: {dec}" if dec else ""
                 lines.append(f"{ind}  - `{o.val}` → **{t.name}** (`{t.id}`, {t.status}{extra}): {o.label}")
             else:
                 lines.append(f"{ind}  - `{o.val}`: {o.label}")
@@ -184,10 +197,14 @@ def render_tree(tax=None) -> str:
     walk(tax.root, 0)
     lines += ["", "## Tests", ""]
     for t in tax.tests.values():
-        dec = PROCEDURES.get(t.id).decisions if t.id in PROCEDURES else ()
+        proc = PROCEDURES.get(t.id)
+        dec = decision_summary(proc) if proc and proc.decisions else ""
         lines.append(f"- `{t.id}` **{t.name}** ({t.status}): {t.when} Checks: {', '.join(t.check_keys)}."
                      + (f" Fallback: {t.fallback.to or t.fallback.technique}." if t.fallback else "")
-                     + (f" Decisions required: {', '.join(dec)}." if dec else ""))
+                     + (f" Decisions required: {dec}." if dec else ""))
+        if dec:
+            for d in proc.decisions:
+                lines.append(f"  - `{d.key}` ({d.domain()}): {d.doc}")
     return "\n".join(lines) + "\n"
 
 
@@ -202,13 +219,17 @@ def cmd_tree(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    """Everything `run` would reject before reading data: taxonomy consistency, decisions, variable roles."""
     spec = _load_spec(args.spec)
     try:
-        spec = spec.complete()
-    except SpecError as e:
+        spec, proc = preflight(spec)
+    except (SpecError, TaxonomyError, NotImplementedError) as e:
         print(f"INVALID: {e}")
         return 1
-    print(f"OK: {spec.test} ({spec.status}); implemented: {'yes' if spec.test in available() else 'no'}")
+    bound = spec.variables.set_roles()
+    print(f"OK: {spec.test} ({spec.status}); implemented: yes; variables bound: {', '.join(bound) or 'none'}"
+          + (f"; decisions: {', '.join(f'{k}={v!r}' for k, v in spec.decisions.items())}" if spec.decisions else ""))
+    print("  (column names and types are checked at run time against the data)")
     return 0
 
 

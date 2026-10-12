@@ -7,8 +7,8 @@ import statsmodels.api as sm
 from scipy import stats
 
 from .. import checks, effects
-from ..data import column, groups, paired
-from ..registry import procedure
+from ..data import column, groups, paired, float_param
+from ..registry import Decision, procedure
 from ..result import Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 
@@ -17,7 +17,7 @@ from ..spec import Spec, SpecError
 def one_sample_t(df: pd.DataFrame, spec: Spec) -> TestResult:
     x = column(df, spec.variables.outcome, "outcome")
     x = x[~np.isnan(x)]
-    mu0 = float(spec.params.get("mu0", 0.0))
+    mu0 = float_param(spec.params, "mu0", default=0.0)
     res = stats.ttest_1samp(x, popmean=mu0, alternative=spec.alternative)
     ci = res.confidence_interval(spec.ci_level)
 
@@ -287,7 +287,14 @@ def rm_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
 # ---------------------------------------------------------------------------
 # Factorial ANOVA (judgment: sums-of-squares type, interaction)
 # ---------------------------------------------------------------------------
-@procedure("factorial_anova", requires=("outcome", "predictors"), decisions=("ss_type", "include_interaction"))
+@procedure(
+    "factorial_anova",
+    requires=("outcome", "predictors"),
+    decisions=(
+        Decision("ss_type", "Sums-of-squares convention; only matters when cells are unbalanced. 2 = each main effect adjusted for the other main effects; 3 = every term adjusted for all others, including the interaction", kind="int", choices=(2, 3)),
+        Decision("include_interaction", "Fit the factor-by-factor interaction (true) or main effects only (false)", kind="bool"),
+    ),
+)
 def factorial_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
     import statsmodels.formula.api as smf
 

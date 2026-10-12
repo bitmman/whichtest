@@ -6,8 +6,8 @@ import pandas as pd
 from statsmodels.duration.survfunc import SurvfuncRight, survdiff
 
 from .. import checks
-from ..data import column
-from ..registry import procedure
+from ..data import column, float_param, int_param
+from ..registry import Decision, procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 
@@ -81,7 +81,7 @@ def km_logrank(df: pd.DataFrame, spec: Spec) -> TestResult:
         grid = np.unique(t)
         diffs = _surv_curve(sfs[0], grid) - _surv_curve(sfs[1], grid)
         # a crossing worth worrying about: the curves separate by > 0.1 in both directions
-        margin = float(spec.params.get("crossing_margin", 0.1))
+        margin = float_param(spec.params, "crossing_margin", default=0.1, lo=0.0, hi=1.0)
         crosses = bool(diffs.max() > margin and diffs.min() < -margin)
         crossing = CheckResult("crossing_curves", "Survival curves don't cross", not crosses, float(max(diffs.max(), -diffs.min())), None, f"S[{labels[0]}] − S[{labels[1]}] ranges from {diffs.min():+.2f} to {diffs.max():+.2f} (margin {margin:g})")
     warnings = []
@@ -187,7 +187,14 @@ def cox(df: pd.DataFrame, spec: Spec) -> TestResult:
 # ---------------------------------------------------------------------------
 # Competing risks (judgment: estimand, event of interest)
 # ---------------------------------------------------------------------------
-@procedure("competing", requires=("time", "event"), decisions=("estimand", "event_of_interest"))
+@procedure(
+    "competing",
+    requires=("time", "event"),
+    decisions=(
+        Decision("estimand", "cumulative_incidence (probability of the event by time t, Aalen–Johansen; for prognosis) or cause_specific_hazard (Cox on the event of interest with competing events censored; for etiology)", choices=("cumulative_incidence", "cause_specific_hazard")),
+        Decision("event_of_interest", "The code in variables.event that is the event of interest; other non-zero codes are competing events (params.censor_code, default 0, = censored)", kind="code"),
+    ),
+)
 def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
     v = spec.variables
     estimand = str(spec.decisions["estimand"]).lower()
@@ -239,7 +246,7 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
             others = sorted(set(codes.tolist()) - {censor})
             mapping = {censor: 0, **{c: i + 1 for i, c in enumerate(others)}}
             aj_codes, aj_eoi = np.array([mapping[c] for c in codes]), mapping[eoi_code]
-        ajf = AalenJohansenFitter(alpha=1 - spec.ci_level, calculate_variance=True, seed=int(spec.params.get("seed", 0))).fit(t, aj_codes, event_of_interest=aj_eoi)
+        ajf = AalenJohansenFitter(alpha=1 - spec.ci_level, calculate_variance=True, seed=int_param(spec.params, "seed", default=0)).fit(t, aj_codes, event_of_interest=aj_eoi)
         cif = ajf.cumulative_density_.iloc[:, 0]
         aj_end = float(cif.iloc[-1])
         cc = compare(
@@ -306,7 +313,13 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
 # ---------------------------------------------------------------------------
 # Clustered / stratified Cox (judgment: approach)
 # ---------------------------------------------------------------------------
-@procedure("cox_cluster", requires=("time", "event", "predictors|formula", "cluster|strata"), decisions=("approach",))
+@procedure(
+    "cox_cluster",
+    requires=("time", "event", "predictors|formula", "cluster|strata"),
+    decisions=(
+        Decision("approach", "cluster_robust (one baseline hazard, sandwich SEs by variables.cluster) or stratify (a separate baseline hazard per level of variables.strata)", choices=("cluster_robust", "stratify")),
+    ),
+)
 def cox_cluster(df: pd.DataFrame, spec: Spec) -> TestResult:
     import patsy
 
@@ -364,15 +377,25 @@ def cox_cluster(df: pd.DataFrame, spec: Spec) -> TestResult:
     from scipy import stats as _st
 
     lr = float(2 * (res.llf - res.model.loglike(np.zeros(len(names)))))
+    extra = {"formula": f"{v.time} ~ {rhs}", "approach": approach, "by": extra_col, "lr_chi2": lr, "lr_p": float(_st.chi2.sf(lr, len(names)))}
+    if approach == "cluster_robust":
+        # The headline test must use the clustered covariance too: the partial-likelihood ratio test
+        # assumes independent subjects, which is exactly what this approach says is false (R3-1).
+        b = np.asarray(res.params, float)
+        V = np.asarray(res.cov_params(), float)
+        wald = float(b @ np.linalg.solve(V, b))
+        stat_name, stat, p = "Wald χ² (cluster-robust)", wald, float(_st.chi2.sf(wald, len(names)))
+    else:
+        stat_name, stat, p = "LR χ² (model)", lr, float(_st.chi2.sf(lr, len(names)))
     return TestResult(
         test="cox_cluster",
         n={"subjects": int(len(d)), "events": int(status.sum()), ("clusters" if approach == "cluster_robust" else "strata"): n_clusters},
-        statistic_name="LR χ² (model)",
-        statistic=lr,
-        p=float(_st.chi2.sf(lr, len(names))),
+        statistic_name=stat_name,
+        statistic=stat,
+        p=p,
         df=float(len(names)),
         estimates=ests,
         checks=chk,
         cross_check=cc,
-        extra={"formula": f"{v.time} ~ {rhs}", "approach": approach, "by": extra_col},
+        extra=extra,
     )

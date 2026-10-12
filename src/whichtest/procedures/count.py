@@ -10,7 +10,7 @@ from statsmodels.stats.rates import confint_poisson_2indep, test_poisson_2indep
 
 from .. import checks
 from ..data import column, int_param, positive_float_param
-from ..registry import procedure
+from ..registry import Decision, procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 from .regression import _coef_estimates, _formula
@@ -145,7 +145,14 @@ def poisson_reg(df: pd.DataFrame, spec: Spec) -> TestResult:
 # ---------------------------------------------------------------------------
 # Zero-inflated count model (judgment: count distribution, zero-process formula)
 # ---------------------------------------------------------------------------
-@procedure("zip", requires=("outcome|formula",), decisions=("count_distribution", "inflation_formula"))
+@procedure(
+    "zip",
+    requires=("outcome|formula",),
+    decisions=(
+        Decision("count_distribution", "Distribution of the count part: poisson, or negbin when the non-zero counts are overdispersed", choices=("poisson", "negbin", "negative_binomial", "nb")),
+        Decision("inflation_formula", 'Right-hand side of the zero-process (logit) model: "1" = constant zero probability; e.g. "group" or "x + z" lets it depend on data columns', kind="str"),
+    ),
+)
 def zip_model(df: pd.DataFrame, spec: Spec) -> TestResult:
     import patsy
     from statsmodels.discrete.count_model import ZeroInflatedNegativeBinomialP, ZeroInflatedPoisson

@@ -10,7 +10,7 @@ from statsmodels.stats.contingency_tables import SquareTable, Table, Table2x2, c
 from statsmodels.stats.proportion import proportion_confint
 
 from .. import checks, effects
-from ..data import blocks, column, contingency_table, int_param, validate_counts
+from ..data import binary_labels, blocks, bool_param, column, contingency_table, float_param, int_param, validate_counts
 from ..registry import procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
@@ -24,18 +24,15 @@ def _k_n(df: pd.DataFrame | None, spec: Spec) -> tuple[int, int]:
             raise SpecError("params.k cannot exceed params.n")
         return k, n
     if df is not None and spec.variables.outcome:
-        y = column(df, spec.variables.outcome, "outcome")
-        y = y[~np.isnan(y)]
-        if not set(np.unique(y)) <= {0.0, 1.0}:
-            raise SpecError("binom_test outcome must be coded 0/1")
-        return int(y.sum()), int(len(y))
-    raise SpecError("binom_test needs params.k and params.n, or a 0/1 variables.outcome column")
+        lab, valid = binary_labels(df, spec.variables.outcome, "outcome", p.get("positive_label"), "positive_label")
+        return int(lab[valid].sum()), int(valid.sum())
+    raise SpecError("binom_test needs params.k and params.n, or a binary variables.outcome column (0/1, or params.positive_label)")
 
 
 @procedure("binom_test", data_optional=True, directional=True)
 def binom_test(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     k, n = _k_n(df, spec)
-    p0 = float(spec.params.get("p0", 0.5))
+    p0 = float_param(spec.params, "p0", default=0.5, lo=0.0, hi=1.0, open_interval=True)
     res = stats.binomtest(k, n, p=p0, alternative=spec.alternative)
     ci = res.proportion_ci(spec.ci_level, method="wilson")
     from statsmodels.stats.proportion import binom_test as sm_binom
@@ -72,7 +69,7 @@ def two_by_two(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     directional = spec.alternative != "two-sided"
     # Fisher's exact test is the primary when cells are sparse, when asked for (params.exact), or when a
     # one-sided alternative is requested: the chi-square test has no direction.
-    use_fisher = exp.passed is False or bool(spec.params.get("exact", False)) or directional
+    use_fisher = exp.passed is False or bool_param(spec.params, "exact", default=False) or directional
     tb = Table2x2(t.astype(int), shift_zeros=False)  # the Pearson statistic must use the observed counts
     r2 = tb.test_nominal_association()
     zero_cell = bool((t == 0).any())
@@ -133,8 +130,8 @@ def chi_sq_indep(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     extra = {"table": t.tolist(), "rows": [str(r) for r in rows], "cols": [str(c) for c in cols], "standardized_resids": resid.tolist()}
     if exp.passed is False:
         # permutation test of the chi-square statistic (the taxonomy's fallback technique)
-        rng = np.random.default_rng(int(spec.params.get("seed", 0)))
-        n_perm = int(spec.params.get("n_perm", 2000))
+        rng = np.random.default_rng(int_param(spec.params, "seed", default=0))
+        n_perm = int_param(spec.params, "n_perm", minimum=100, default=2000)
         ri = np.repeat(np.arange(t.shape[0]), t.sum(1).astype(int))
         ci = np.repeat(np.arange(t.shape[1]), t.sum(0).astype(int))
         count = 0
@@ -255,7 +252,7 @@ def mcnemar_test(df: pd.DataFrame | None, spec: Spec) -> TestResult:
     if t.shape != (2, 2):
         raise SpecError(f"mcnemar needs a 2×2 paired table; got {t.shape}. Use stuart_maxwell for more categories")
     b, c = int(t[0, 1]), int(t[1, 0])
-    exact = bool(spec.params.get("exact", b + c < 25))
+    exact = bool_param(spec.params, "exact", default=b + c < 25)
     res = mcnemar(t, exact=exact, correction=True)
     if exact:
         p2 = stats.binomtest(b, b + c, 0.5).pvalue if b + c > 0 else float("nan")

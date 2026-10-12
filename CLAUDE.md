@@ -42,7 +42,7 @@ Design work so far happened in a claude.ai chat on 2026-10-12. The interactive t
   - `taxonomy.py` — loads `taxonomy.json` (repo root in a checkout, packaged copy in a wheel), validates it, walks it: `next_question`, `resolve`, `paths_to`.
   - `spec.py` — pydantic `Spec` / `Design` / `Variables`. `Spec.from_design()` resolves through the taxonomy; `Spec.complete()` fills the informational fields and refuses inconsistent specs (a `test` that differs from what the design resolves to is allowed only if it is on that test's fallback chain).
   - `result.py` — `TestResult`, `CheckResult`, `Estimate`, `CrossCheck`; `compare()` implements the three agreement kinds (`exact` within tolerance, `approximate` = same decision at alpha or |Δp| small, `direction` = same sign).
-  - `registry.py` — `@procedure(test_id, requires=..., decisions=...)` decorator and `run(spec, df)`; judgment tests refuse to run unless `spec.decisions` has every key the procedure declares.
+  - `registry.py` — `@procedure(test_id, requires=..., decisions=(Decision(...), ...))` decorator, `preflight(spec)` (everything checked before data is read: taxonomy path, implementation, typed decisions, variable roles, alternative) and `run(spec, df)`. A `Decision` names a key, its kind (`choice`, `bool`, `int`, `str`, `code`), its domain and, for conditional keys, `when=(key, value)`. Validation never coerces: `"false"`, `2.9` and unknown keys are rejected, and the decisions echoed in the result are exactly what was written. Formula errors from patsy surface as `SpecError`.
   - `data.py` — column binding helpers (`groups`, `paired`, `blocks`, `contingency_table`). Wide and long repeated-measures layouts are both accepted.
   - `checks.py`, `effects.py` — shared assumption checks and effect sizes.
   - `delong.py` — DeLong AUC variance and paired AUC comparison (not in any library).
@@ -110,7 +110,7 @@ Implemented in `spec.py`. What the skill hands to the pipeline. `whichtest resol
 - `variables` roles: `outcome`, `group`, `subject`, `within`, `columns` (wide repeated / raters), `before`/`after`, `x`/`y`, `row`/`col`, `time`, `event`, `exposure`, `predictors`, `categorical`, `formula`. A procedure declares which it needs (`requires=`); `"a|b"` means either.
 - `params` carries test constants: `mu0`/`m0`, `p0`, `k`/`n`, `table`, `observed`/`expected`, `count1`…`exposure2`, `weights` and `levels` (kappa), `positive_label` / `test_positive_label`, `timepoints`, `exact`, `zero_method`, `n_boot`, `seed`. Counts, exposures and tables are validated before use (`data.validate_counts`).
 - `alternative` is honoured only by procedures registered with `directional=True`; `run()` rejects a one-sided request for the others rather than report a two-sided p-value under a one-sided label.
-- `decisions` is where judgment tests get their human choices (random-effects structure, working correlation, ICC form, sums-of-squares type, estimand). `run()` refuses a judgment test whose declared decision keys are empty.
+- `decisions` is where judgment tests get their human choices (random-effects structure, working correlation, ICC form, sums-of-squares type, estimand). `run()` refuses a judgment test whose declared decisions are missing or out of domain, and refuses decisions a test does not take. `whichtest show <test_id>` and `whichtest check spec.json` report them.
 - The fields after the blank line are informational. `Spec.complete()` fills them from the taxonomy; if supplied they must agree or the spec is rejected.
 
 ## Result contract
@@ -190,13 +190,13 @@ Started 2026-10-12 on the user's go-ahead.
 | `zip` | `count_distribution` (poisson, negbin), `inflation_formula` (RHS, `"1"` = intercept only) | |
 | `competing` | `estimand` (cumulative_incidence, cause_specific_hazard), `event_of_interest` (event code; 0 = censored) | `event` holds the event type |
 | `cox_cluster` | `approach` (cluster_robust, stratify) | `cluster` or `strata` |
-| `factor_sem` | `approach` (exploratory: + `n_factors`, `rotation`; confirmatory: + `model_syntax`, needs semopy) | `columns` = items |
+| `factor_sem` | `approach` (exploratory: + `n_factors` ≥ 1, `rotation` incl. explicit `none`; confirmatory: + `model_syntax`, needs semopy). The conditional keys are declared with `when=` and demanded only on their branch | `columns` = items |
 | `icc` | `icc_form` (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k, or the ICC(2,1)/ICC(A,1) spellings) | `columns` or `outcome`+`subject`+`within` |
 
 ### Adding a test
 
 1. `uv run whichtest show <test_id>` for the taxonomy's run / cross / checks / report.
-2. Write `fn(df, spec) -> TestResult` in the right `procedures/` module, decorated `@procedure("<test_id>", requires=(...))`. For a judgment test, also pass `decisions=(...)` naming the keys the human must set.
+2. Write `fn(df, spec) -> TestResult` in the right `procedures/` module, decorated `@procedure("<test_id>", requires=(...))`. For a judgment test, also pass `decisions=(Decision(key, doc, kind=..., choices=..., when=...), ...)`; the registry validates them before the procedure runs, and `whichtest tree` regenerates the skill's reference from them. Read `params` through `data.int_param` / `float_param` / `bool_param`, never a bare `params.get` cast.
 3. Fill `checks` (one `CheckResult` per taxonomy check key, in order) and `cross_check` via `compare()`.
 4. Add a spec to `SPECS` in `tests/test_procedures.py`; the parametrized test asserts the cross-check agrees.
 
@@ -236,7 +236,19 @@ Runtime results recorded in this session: existing suite at `e7135ed` 142 passed
 - R8 `blocks()` and `paired()` take `numeric=False` for nominal procedures: Cohen's and Fleiss' kappa, Stuart–Maxwell and McNemar keep string labels through complete-case selection and code them afterwards (`categorical._sorted_levels`). Weighted kappa on string labels needs `params.levels` (an ordered list).
 - R9 AUC with fewer than two cases in a class: `delong.py` raises; `roc_auc` returns the point estimate with no CI, no z/p, a failed `ci_method` check and a warning (so it is flagged); `delong` rejects with a `SpecError`.
 
-Still open after round two: typed validation of `params`/`decisions` as a whole (the count/exposure/table/event-code inputs are now validated, but the dicts are still free-form). Done after round two, while round three was pending: the CI matrix, base-only install job and wheel smoke test (`.github/workflows/ci.yml`, `tests/test_base_install.py`); the confirmatory `factor_sem` branch (semopy, `tests/test_cfa.py`); and `competing` with `estimand=cumulative_incidence` now refuses to run without lifelines instead of returning only the naive 1 − KM.
+Done after round two, while round three was pending: the CI matrix, base-only install job and wheel smoke test (`.github/workflows/ci.yml`, `tests/test_base_install.py`); the confirmatory `factor_sem` branch (semopy, `tests/test_cfa.py`); and `competing` with `estimand=cumulative_incidence` now refuses to run without lifelines instead of returning only the naive 1 − KM.
+
+**2026-10-12, round-three review (`../codex_astra_review_round3.md`, 8 findings) and judgment/CLI/skill acceptance suite** (`tests/test_independent_r3_{judgment,cli,skill_fixtures}.py`, 67 cases, plus `tests/fixtures/r3_study_cases.json` with three study descriptions and their target specs for a future skill harness). Before fixes: 52 passed, 15 failed, all mapping to R3-1…R3-8. After the fixes below the whole suite passes (see `tests/INDEPENDENT_TESTS.md` for the counts); no reviewer test was skipped, marked xfail or weakened. Own regression tests: `tests/test_round3.py`.
+
+- R3-1 `cox_cluster` with `approach=cluster_robust` reports a cluster-robust Wald χ² (b′V⁻¹b with the sandwich covariance) as the headline statistic; the independence-based LR test moves to `extra["lr_chi2"]`/`lr_p`. Stratified Cox keeps the LR test.
+- R3-2 assumption checks never list observations: `checks.outliers_z` reports the count and the largest |z|; `roc_auc` no longer echoes the threshold vector (every threshold is an observed score). The skill no longer suggests `head` on the data file.
+- R3-3/R3-4/R3-6 typed decisions (`registry.Decision`): every judgment decision has a kind, a domain and, for `factor_sem`, a condition. `rotation` must be explicit (`none` is a value, not a default); `n_factors` must be an integer ≥ 1 and smaller than the number of items; `ss_type` ∈ {2, 3}; `include_interaction`/`reml` must be JSON booleans; unknown keys are rejected; patsy errors from `re_formula`, `inflation_formula` or any formula become `SpecError`. `whichtest show` prints the decisions with domains and conditions; `whichtest tree` writes them into the skill's reference.
+- R3-5 `lmm` tries `lbfgs`, `powell`, `cg` one at a time and skips an optimizer that raises `LinAlgError` (statsmodels' own list only skips non-convergence); the optimizer used is in `extra["optimizer"]` and a fallback is announced in `warnings`.
+- R3-7 `whichtest check` runs `registry.preflight`: taxonomy path, implementation, decisions, variable roles and alternative are all validated before any data is read; exit 1 with the reason otherwise.
+- R3-8 `binom_test` reads a labelled outcome through `data.binary_labels` with `params.positive_label`, like the other binary leaves; the skill's column-binding step lists which tests take `positive_label` and `test_positive_label`.
+- Also from the assessment: `params` reads go through `data.int_param` / `float_param` / `bool_param` (`exact="false"`, `p0="bad"`, `n_boot="many"`, `seed=True` are rejected instead of coerced); the skill gained a "before you stop at a leaf" section for the three routing risks the review named (baseline-adjusted trials are not paired tests, arm-by-time is not one-factor RM-ANOVA, relapse with prior death is competing risks) and a reporting rule for tests without a headline statistic.
+
+Still open: an executed evaluation of the skill itself with a model (the round-three fixtures describe three studies and their target specs; nothing has run them through an LLM yet).
 
 ## Conventions
 

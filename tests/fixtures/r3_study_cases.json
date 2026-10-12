@@ -1,0 +1,41 @@
+[
+  {
+    "id": "paired_change",
+    "difficulty": 1,
+    "description": "Thirty adults have systolic blood pressure measured before and after a four-week exercise programme. There is one cohort, no control arm and no adjustment covariates. Is the mean within-person change different from zero? Columns are sbp_before and sbp_after, one patient per row.",
+    "expected_spec": {
+      "test": "paired_t",
+      "design": {"goal":"single_outcome","outcome_type":"continuous","structure":"paired"},
+      "variables": {"before":"sbp_before","after":"sbp_after"},
+      "alternative":"two-sided",
+      "decisions": {}
+    },
+    "rubric": ["Preserve patient pairing", "Do not use independent samples", "Do not infer a treatment-versus-control effect from this study"]
+  },
+  {
+    "id": "adjusted_parallel_trial",
+    "difficulty": 2,
+    "description": "A two-arm individually randomized trial asks whether week-12 systolic blood pressure differs by treatment after adjusting for baseline blood pressure and age. Each patient supplies one analysis row. There are no site clusters. Columns are sbp_week12, sbp_baseline, age and arm. The prespecified model has common baseline and age slopes, with no interactions.",
+    "expected_spec": {
+      "test":"multiple_reg",
+      "design":{"goal":"single_outcome","outcome_type":"continuous","structure":"independent","predictors":"multiple_mixed"},
+      "variables":{"outcome":"sbp_week12","predictors":["arm","sbp_baseline","age"],"categorical":["arm"]},
+      "alternative":"two-sided",
+      "decisions":{}
+    },
+    "rubric":["Baseline is an adjustment covariate, not an instruction to run a pooled paired t-test", "Treat arm as categorical", "Include both prespecified covariates"]
+  },
+  {
+    "id":"treatment_by_visit",
+    "difficulty":3,
+    "description":"A randomized drug/placebo trial records systolic blood pressure at baseline and weeks 4, 8 and 12 in long format (id, arm, week, sbp); some visits are missing. The question is whether the linear change per week differs between arms. Patients are independent of one another. The analyst explicitly chooses a subject-specific linear mixed model with correlated random intercept and week slope per patient, fitted by REML. Keep the arm-by-week interaction. Do not replace the prespecified subject-specific target with a population-averaged model.",
+    "expected_spec":{
+      "test":"lmm",
+      "design":{"goal":"single_outcome","outcome_type":"continuous","structure":"repeated_or_clustered","repeated_pattern":"unbalanced_or_nested"},
+      "variables":{"outcome":"sbp","predictors":["arm","week"],"categorical":["arm"],"subject":"id","within":"week","formula":"sbp ~ C(arm) * week"},
+      "alternative":"two-sided",
+      "decisions":{"re_formula":"~week","reml":true}
+    },
+    "rubric":["Retain treatment-by-time interaction and missing visits", "Do not use a pooled paired t-test or complete-case repeated-measures ANOVA", "Random effects and REML are supplied human choices; without them ask before running", "Explain the interaction coefficient and its CI; do not call the model's omnibus statistic the treatment interaction test"]
+  }
+]

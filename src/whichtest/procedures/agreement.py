@@ -6,8 +6,8 @@ import pandas as pd
 from statsmodels.stats.inter_rater import aggregate_raters, cohens_kappa, fleiss_kappa, to_table
 
 from .. import checks, effects
-from ..data import blocks
-from ..registry import procedure
+from ..data import blocks, float_param, int_param
+from ..registry import Decision, procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 
@@ -107,8 +107,8 @@ def fleiss(df: pd.DataFrame, spec: Spec) -> TestResult:
         )
     except ImportError:
         pass
-    n_boot = int(spec.params.get("n_boot", 1000))
-    lo, hi = effects.bootstrap_ci(lambda r: fleiss_kappa(aggregate_raters(r)[0]), ratings, level=spec.ci_level, n_boot=n_boot, seed=int(spec.params.get("seed", 0)))
+    n_boot = int_param(spec.params, "n_boot", minimum=50, default=1000)
+    lo, hi = effects.bootstrap_ci(lambda r: fleiss_kappa(aggregate_raters(r)[0]), ratings, level=spec.ci_level, n_boot=n_boot, seed=int_param(spec.params, "seed", default=0))
     dropped = m.attrs.get("dropped", 0)
     return TestResult(
         test="fleiss_kappa",
@@ -151,7 +151,7 @@ def bland_altman(df: pd.DataFrame, spec: Spec) -> TestResult:
     n = len(d)
     bias, sd = float(d.mean()), float(d.std(ddof=1))
     z = _st.norm.ppf(0.5 + spec.ci_level / 2)
-    k = float(spec.params.get("loa_multiplier", 1.96))
+    k = float_param(spec.params, "loa_multiplier", default=1.96, lo=0.0, open_interval=True)
     loa = (bias - k * sd, bias + k * sd)
     t = _st.t.ppf(0.5 + spec.ci_level / 2, n - 1)
     se_bias = sd / np.sqrt(n)
@@ -335,7 +335,7 @@ def roc_auc(df: pd.DataFrame, spec: Spec) -> TestResult:
         ],
         cross_check=cc,
         warnings=warnings + (["Fewer than two cases in a class: the AUC has no estimable variance; no CI or p-value reported."] if min(n1, n0) < 2 else []),
-        extra={"roc": {"fpr": fpr.tolist(), "tpr": tpr.tolist(), "thresholds": [float(t) if np.isfinite(t) else None for t in thr]}},
+        extra={"roc": {"fpr": fpr.tolist(), "tpr": tpr.tolist(), "n_thresholds": int(len(thr))}},  # thresholds are observed scores; not echoed
     )
 
 
@@ -356,8 +356,8 @@ def delong(df: pd.DataFrame, spec: Spec) -> TestResult:
     # cross-check: paired bootstrap of the AUC difference
     from sklearn.metrics import roc_auc_score
 
-    rng = np.random.default_rng(int(spec.params.get("seed", 0)))
-    n_boot = int(spec.params.get("n_boot", 2000))
+    rng = np.random.default_rng(int_param(spec.params, "seed", default=0))
+    n_boot = int_param(spec.params, "n_boot", minimum=50, default=2000)
     diffs = []
     idx1, idx0 = np.flatnonzero(truth == 1), np.flatnonzero(truth == 0)
     for _ in range(n_boot):  # stratified so every resample has both classes
@@ -420,7 +420,18 @@ _ICC_DESC = {
 }
 
 
-@procedure("icc", requires=("columns|outcome",), decisions=("icc_form",))
+@procedure(
+    "icc",
+    requires=("columns|outcome",),
+    decisions=(
+        Decision(
+            "icc_form",
+            "Shrout–Fleiss form: ICC1 (one-way random: each target rated by different raters), ICC2 (two-way random, absolute agreement), ICC3 (two-way mixed, consistency); the k variants are the reliability of the average of k raters. ICC(2,1)/ICC(A,1)-style spellings are accepted",
+            choices=tuple(_ICC_PG),
+            normalize=lambda k: _ICC_FORMS.get(k.upper().replace(" ", ""), k).lower(),
+        ),
+    ),
+)
 def icc(df: pd.DataFrame, spec: Spec) -> TestResult:
     import statsmodels.api as sm
     import statsmodels.formula.api as smf

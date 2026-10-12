@@ -8,7 +8,7 @@ import statsmodels.formula.api as smf
 from statsmodels.multivariate.manova import MANOVA
 
 from .. import checks
-from ..registry import procedure
+from ..registry import Decision, procedure
 from ..result import CheckResult, CrossCheck, Comparison, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 
@@ -257,7 +257,19 @@ def _kmo_bartlett(items: pd.DataFrame) -> tuple[float, float, float]:
     return float(kmo), float(chi2), float(stats.chi2.sf(chi2, dof))
 
 
-@procedure("factor_sem", requires=("columns",), decisions=("approach",))
+_ROTATIONS = ("none", "varimax", "quartimax", "biquartimax", "equamax", "oblimin", "promax", "parsimax", "parsimony", "biquartimin")
+
+
+@procedure(
+    "factor_sem",
+    requires=("columns",),
+    decisions=(
+        Decision("approach", "exploratory (how many factors, which rotation) or confirmatory (a specified measurement model, needs semopy)", choices=("exploratory", "confirmatory")),
+        Decision("n_factors", "Number of factors to extract (from theory, a scree plot or parallel analysis; the pipeline will not pick it)", kind="int", minimum=1, when=("approach", "exploratory")),
+        Decision("rotation", "Rotation of the loadings: none, an orthogonal rotation (varimax, quartimax, equamax, ...) or an oblique one (oblimin, promax) when factors may correlate", choices=_ROTATIONS, when=("approach", "exploratory")),
+        Decision("model_syntax", 'lavaan-style measurement model for semopy, one factor per line, e.g. "F1 =~ i0 + i1 + i2" and "F2 =~ i3 + i4 + i5"', kind="str", when=("approach", "confirmatory")),
+    ),
+)
 def factor_sem(df: pd.DataFrame, spec: Spec) -> TestResult:
     from statsmodels.multivariate.factor import Factor
 
@@ -278,18 +290,19 @@ def factor_sem(df: pd.DataFrame, spec: Spec) -> TestResult:
     extra: dict = {"kmo": kmo}
     cc = None
     if approach == "exploratory":
-        k = spec.decisions.get("n_factors")
-        if not k:
-            raise SpecError("exploratory factor analysis needs decisions.n_factors")
-        k = int(k)
-        rotation = spec.decisions.get("rotation", "varimax")
+        k = int(spec.decisions["n_factors"])  # validated by the registry: an integer ≥ 1
+        if k >= p:
+            raise SpecError(f"decisions.n_factors={k} must be smaller than the number of items ({p})")
+        rotation = str(spec.decisions["rotation"]).strip().lower()  # validated: one of _ROTATIONS; "none" is explicit
+        if rotation not in _ROTATIONS:
+            raise SpecError(f"decisions.rotation must be one of {list(_ROTATIONS)}; got {spec.decisions['rotation']!r}")
         fa = Factor(items, n_factor=k, method="ml").fit()
-        if rotation and str(rotation).lower() != "none":
-            fa.rotate(str(rotation))
+        if rotation != "none":
+            fa.rotate(rotation)
         L = np.real(np.asarray(fa.loadings))
         pa = Factor(items, n_factor=k, method="pa").fit()
-        if rotation and str(rotation).lower() != "none":
-            pa.rotate(str(rotation))
+        if rotation != "none":
+            pa.rotate(rotation)
         L2 = np.real(np.asarray(pa.loadings))
         # Tucker congruence between ML and principal-axis loadings, matching columns by best congruence
         def congr(a, b):
@@ -319,7 +332,7 @@ def factor_sem(df: pd.DataFrame, spec: Spec) -> TestResult:
         extra.update({"n_factors": k, "rotation": rotation, "loadings": {c: [float(x) for x in L[i]] for i, c in enumerate(items_cols)}, "uniqueness": {c: float(u) for c, u in zip(items_cols, uniq)}})
     else:
         syntax = spec.decisions.get("model_syntax")
-        if not syntax:
+        if not syntax or not str(syntax).strip():
             raise SpecError("confirmatory factor analysis needs decisions.model_syntax (lavaan-style, for semopy)")
         try:
             import semopy

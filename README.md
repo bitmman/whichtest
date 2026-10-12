@@ -46,10 +46,11 @@ result.flagged                 # True if a check failed or the cross-check disag
 
 - Taxonomy done: 51 tests across 54 decision paths.
 - **All 51 tests implemented**, each with assumption checks, effect sizes, an independent cross-check, and a unit test (`uv run whichtest list`). Includes a DeLong implementation validated against a bootstrap.
-- The 12 judgment tests refuse to run until `spec.decisions` carries the human choices (`uv run whichtest show lmm` lists them), and echo those choices in the result.
+- The 12 judgment tests refuse to run until `spec.decisions` carries the human choices (`uv run whichtest show lmm` lists them with their accepted values), reject look-alikes (`"false"`, `2.9`, unknown keys) instead of coercing them, and echo the choices verbatim in the result. `uv run whichtest check spec.json` validates all of this before any data is read.
 - Skill written; not yet exercised on a real study.
 - Continuous integration runs the suite on Python 3.10 to 3.13 with both newest and oldest allowed dependencies, plus a base-only install (no cross-check libraries) and a wheel install. Without the cross-check libraries every test still runs and says its cross-check was not run.
-- Two rounds of third-party review (2026-10-12) found 13 + 9 defects, all fixed and pinned by tests. The second round also contributed 107 independent acceptance tests (`tests/test_independent_*.py`, documented in `tests/INDEPENDENT_TESTS.md`) with reference values computed outside the package; the whole suite is 249 tests. See the review log in CLAUDE.md.
+- Three rounds of third-party review (2026-10-12) found 13 + 9 + 8 defects, all fixed and pinned by tests. Rounds two and three contributed 174 independent acceptance tests (`tests/test_independent_*.py`, documented in `tests/INDEPENDENT_TESTS.md`) with reference values computed outside the package, and three study descriptions with target specs for evaluating the skill (`tests/fixtures/r3_study_cases.json`). See the review log in CLAUDE.md.
+- Reports never contain individual observations: assumption checks report counts and extreme statistics, not values, so the pipeline's output can be read by a model without leaking data.
 - One-sided alternatives are accepted only by the tests that can honour them end to end; the others reject the request instead of quietly reporting a two-sided p-value.
 
 Next: try it on a real (synthetic-stand-in) analysis end to end, then tighten what the skill asks.

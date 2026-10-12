@@ -97,7 +97,9 @@ def outliers_z(x: np.ndarray, key: str, text: str, z: float = 3.0) -> CheckResul
         return CheckResult(key, text, None, detail="too few values to assess")
     zs = np.abs(stats.zscore(x, ddof=1))
     idx = np.flatnonzero(zs > z)
-    detail = f"{len(idx)} value(s) with |z| > {z:g}" + (f": {np.round(x[idx], 3).tolist()}" if len(idx) else "")
+    # Report how many and how extreme, never the observations themselves: this text goes into
+    # reports that may be read by a model (privacy rule in CLAUDE.md).
+    detail = f"{len(idx)} value(s) with |z| > {z:g}; max |z| = {zs.max():.2f}"
     return CheckResult(key, text, bool(len(idx) == 0), float(zs.max()), None, detail, {"n_outliers": int(len(idx))})
 
 

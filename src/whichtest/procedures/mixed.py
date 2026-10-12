@@ -12,7 +12,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
 from .. import checks
-from ..registry import procedure
+from ..registry import Decision, procedure
 from ..result import CheckResult, Estimate, TestResult, compare
 from ..spec import Spec, SpecError
 from ..data import formula_columns
@@ -26,9 +26,27 @@ _CORR = {
 }
 
 
+def _corr_key(name: str) -> str:
+    key = str(name).lower().replace("(", "").replace(")", "").replace("-", "").replace("_", "").replace(" ", "")
+    return {"ar": "ar1", "autoregressive": "ar1", "exch": "exchangeable", "ind": "independence", "unstr": "unstructured", "globaloddsratio": "global_odds_ratio", "gor": "global_odds_ratio"}.get(key, key)
+
+
+WORKING_CORRELATION = Decision(
+    "working_correlation",
+    "Assumed within-subject correlation for GEE: independence, exchangeable, ar1 (needs variables.time), unstructured (needs integer visit positions in variables.time). Estimates stay consistent under misspecification; efficiency and the sandwich SEs change",
+    choices=("independence", "exchangeable", "ar1", "unstructured"),
+    normalize=_corr_key,
+)
+CATEGORICAL_CORRELATION = Decision(
+    "working_correlation",
+    "Within-subject association for categorical GEE: global_odds_ratio or independence",
+    choices=("global_odds_ratio", "independence"),
+    normalize=_corr_key,
+)
+
+
 def _cov_struct(name: str):
-    key = str(name).lower().replace("(", "").replace(")", "").replace("-", "").replace("_", "")
-    key = {"ar": "ar1", "autoregressive": "ar1", "exch": "exchangeable", "ind": "independence", "unstr": "unstructured"}.get(key, key)
+    key = _corr_key(name)
     if key not in _CORR:
         raise SpecError(f"decisions.working_correlation must be one of {list(_CORR)}; got {name!r}")
     return key, _CORR[key]()
@@ -61,7 +79,17 @@ def _coef_est(params, bse, names, level, exp=False, prefix="") -> list[Estimate]
 
 
 # ---------------------------------------------------------------------------
-@procedure("lmm", requires=("outcome|formula", "subject"), decisions=("re_formula", "reml"))
+_LMM_OPTIMIZERS = ("lbfgs", "powell", "cg")
+
+
+@procedure(
+    "lmm",
+    requires=("outcome|formula", "subject"),
+    decisions=(
+        Decision("re_formula", 'Random-effects structure per subject: "1" = random intercept only; "~time" = random intercept and slope on that column (names must be data columns)', kind="str"),
+        Decision("reml", "Restricted maximum likelihood (true; unbiased variance components) or full ML (false; needed to compare fixed-effect structures by likelihood)", kind="bool"),
+    ),
+)
 def lmm(df: pd.DataFrame, spec: Spec) -> TestResult:
     f = _formula(spec, df)
     subj = spec.variables.subject
@@ -73,9 +101,24 @@ def lmm(df: pd.DataFrame, spec: Spec) -> TestResult:
     model = smf.mixedlm(f, d, groups=d[subj], re_formula=re_formula)
     import warnings as _w
 
-    with _w.catch_warnings(record=True) as caught:
-        _w.simplefilter("always")
-        res = model.fit(reml=reml, method=["lbfgs", "powell", "cg"])  # try several optimizers before giving up
+    # Try the optimizers one at a time: statsmodels' own list only skips optimizers that fail
+    # to converge, not ones that crash on a singular score matrix (R3-5).
+    res, caught, used, failed = None, [], None, []
+    for meth in _LMM_OPTIMIZERS:
+        with _w.catch_warnings(record=True) as got:
+            _w.simplefilter("always")
+            try:
+                r = model.fit(reml=reml, method=meth)
+            except (np.linalg.LinAlgError, ValueError, FloatingPointError) as e:
+                failed.append(f"{meth}: {type(e).__name__}: {e}")
+                continue
+        ok = bool(r.converged) and np.isfinite(np.asarray(r.bse_fe, float)).all()
+        if res is None or ok:
+            res, caught, used = r, list(got), meth
+        if ok:
+            break
+    if res is None:
+        raise SpecError(f"lmm: no optimizer could fit the model ({'; '.join(failed)}); simplify re_formula or fall back to GEE")
     boundary = [str(w.message)[:120] for w in caught if "converge" in str(w.message).lower() or "boundary" in str(w.message).lower() or "singular" in str(w.message).lower()]
     fe_names = list(res.fe_params.index)
     # cross-check: GEE with an exchangeable working correlation
@@ -99,6 +142,8 @@ def lmm(df: pd.DataFrame, spec: Spec) -> TestResult:
         _cluster_checks(d[subj], 20),
     ]
     warnings = []
+    if failed:
+        warnings.append(f"optimizer fallback: {'; '.join(failed)}; fitted with {used}")
     if chk[1].passed is False:
         warnings.append("Convergence or boundary problems: simplify the random-effects structure or fall back to GEE (gee_cont).")
     return TestResult(
@@ -112,7 +157,7 @@ def lmm(df: pd.DataFrame, spec: Spec) -> TestResult:
         checks=chk,
         cross_check=cc,
         warnings=warnings,
-        extra={"formula": f, "re_formula": re_formula, "reml": reml, "cov_re": np.asarray(res.cov_re).tolist(), "llf": float(res.llf), "gee_bse": {nm: float(gee.bse[nm]) for nm in fe_names}},
+        extra={"formula": f, "re_formula": re_formula, "reml": reml, "optimizer": used, "cov_re": np.asarray(res.cov_re).tolist(), "llf": float(res.llf), "gee_bse": {nm: float(gee.bse[nm]) for nm in fe_names}},
     )
 
 
@@ -175,21 +220,21 @@ def _gee(df: pd.DataFrame, spec: Spec, family, test: str, exp: bool, prefix: str
     )
 
 
-@procedure("gee_cont", requires=("outcome|formula", "subject"), decisions=("working_correlation",))
+@procedure("gee_cont", requires=("outcome|formula", "subject"), decisions=(WORKING_CORRELATION,))
 def gee_cont(df: pd.DataFrame, spec: Spec) -> TestResult:
     r = _gee(df, spec, sm.families.Gaussian(), "gee_cont", False, "")
     r.checks.append(checks.manual("missingness", "Missing data plausibly completely at random (GEE needs MCAR; a mixed model tolerates MAR)"))
     return r
 
 
-@procedure("gee_logit", requires=("outcome|formula", "subject"), decisions=("working_correlation",))
+@procedure("gee_logit", requires=("outcome|formula", "subject"), decisions=(WORKING_CORRELATION,))
 def gee_logit(df: pd.DataFrame, spec: Spec) -> TestResult:
     r = _gee(df, spec, sm.families.Binomial(), "gee_logit", True, "OR ")
     r.checks.append(checks.manual("estimand", "Population-averaged rather than subject-specific effects are what you want"))
     return r
 
 
-@procedure("gee_poisson", requires=("outcome|formula", "subject"), decisions=("working_correlation",))
+@procedure("gee_poisson", requires=("outcome|formula", "subject"), decisions=(WORKING_CORRELATION,))
 def gee_poisson(df: pd.DataFrame, spec: Spec) -> TestResult:
     ex = spec.variables.exposure
     r = _gee(df, spec, sm.families.Poisson(), "gee_poisson", True, "RR ", offset_col=ex)
@@ -208,7 +253,7 @@ def _design(spec: Spec, df: pd.DataFrame) -> tuple[str, pd.DataFrame, pd.DataFra
     return yname, d.loc[X.index], X
 
 
-@procedure("ordinal_gee", requires=("outcome|formula", "subject"), decisions=("working_correlation",))
+@procedure("ordinal_gee", requires=("outcome|formula", "subject"), decisions=(CATEGORICAL_CORRELATION,))
 def ordinal_gee(df: pd.DataFrame, spec: Spec) -> TestResult:
     from statsmodels.miscmodels.ordinal_model import OrderedModel
 
@@ -252,7 +297,7 @@ def ordinal_gee(df: pd.DataFrame, spec: Spec) -> TestResult:
     )
 
 
-@procedure("nominal_gee", requires=("outcome|formula", "subject"), decisions=("working_correlation",))
+@procedure("nominal_gee", requires=("outcome|formula", "subject"), decisions=(CATEGORICAL_CORRELATION,))
 def nominal_gee(df: pd.DataFrame, spec: Spec) -> TestResult:
     yname, d, X = _design(spec, df)
     cats = pd.Categorical(d[yname])
