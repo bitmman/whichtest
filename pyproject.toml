@@ -42,6 +42,7 @@ testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = [
     "ignore:Starting with pandas version 4.0",
+    "ignore:datetime.datetime.utcnow:DeprecationWarning",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]

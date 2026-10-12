@@ -118,3 +118,60 @@ def point_biserial(df: pd.DataFrame, spec: Spec) -> TestResult:
         ],
         cross_check=cc,
     )
+
+
+# ---------------------------------------------------------------------------
+# Partial correlation (helper)
+# ---------------------------------------------------------------------------
+@procedure("partial_corr", requires=("x", "y|outcome", "predictors"))
+def partial_corr(df: pd.DataFrame, spec: Spec) -> TestResult:
+    import statsmodels.api as sm
+
+    v = spec.variables
+    xn, yn, covs = v.x, v.y or v.outcome, list(v.predictors)
+    for c in [xn, yn, *covs]:
+        if c not in df.columns:
+            raise SpecError(f"column {c!r} is not in the data")
+    d = df[[xn, yn, *covs]].apply(pd.to_numeric, errors="coerce").dropna()
+    Z = sm.add_constant(d[covs].to_numpy(float))
+    rx = sm.OLS(d[xn].to_numpy(float), Z).fit().resid
+    ry = sm.OLS(d[yn].to_numpy(float), Z).fit().resid
+    r_resid, p_resid = stats.pearsonr(rx, ry)
+    n, k = len(d), len(covs)
+    # exact test with the right degrees of freedom (n − k − 2)
+    dfree = n - k - 2
+    t = r_resid * np.sqrt(dfree / (1 - r_resid**2)) if abs(r_resid) < 1 else float("inf")
+    p = float(2 * stats.t.sf(abs(t), dfree))
+    cc = None
+    try:
+        import pingouin as pg
+
+        pc = pg.partial_corr(data=d, x=xn, y=yn, covar=covs)
+        cc = compare(
+            "pingouin.partial_corr",
+            "Correlating residuals gives the same coefficient. Its p-value uses too many degrees of freedom, so trust pingouin's.",
+            {"r": r_resid, "p": p},
+            {"r": float(pc["r"].iloc[0]), "p": float(pc["p-val"].iloc[0] if "p-val" in pc.columns else pc["p_val"].iloc[0])},
+            rtol=1e-6,
+            atol=1e-8,
+        )
+    except ImportError:
+        pass
+    ci = effects.fisher_z_ci(float(r_resid), n - k, spec.ci_level, "partial r")
+    chk = [
+        checks.manual("linearity", "Linear relationships with the covariates", "inspect residual plots"),
+        checks.shapiro(np.concatenate([rx, ry]), "residual_normality", "Residuals roughly normal", spec.alpha),
+    ]
+    return TestResult(
+        test="partial_corr",
+        n=n,
+        statistic_name="t",
+        statistic=float(t),
+        p=p,
+        df=float(dfree),
+        effect_size=Estimate("partial r", float(r_resid), ci.ci, spec.ci_level, f"controlling for {', '.join(covs)}; Fisher z"),
+        estimates=[Estimate("zero-order r", float(stats.pearsonr(d[xn], d[yn]).statistic))],
+        checks=chk,
+        cross_check=cc,
+        extra={"naive_residual_p": float(p_resid)},
+    )

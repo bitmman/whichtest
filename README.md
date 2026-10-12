@@ -12,7 +12,7 @@ Give it a study design and your data; it picks the right test, checks the assump
 
 ```bash
 uv sync --extra dev            # or: pip install -e '.[dev]'
-uv run pytest                  # 54 tests
+uv run pytest
 
 uv run whichtest ask --out spec.json             # answer the taxonomy questions → spec
 # edit spec.json: bind your columns under "variables"
@@ -44,8 +44,8 @@ result.flagged                 # True if a check failed or the cross-check disag
 ## Where it stands
 
 - Taxonomy done: 51 tests across 54 decision paths.
-- **28 ready tests implemented**, each with assumption checks, effect sizes, a cross-check, and a unit test (`uv run whichtest list`).
-- 11 helper tests and 12 judgment tests are still to do. Judgment tests will refuse to run until `spec.decisions` is filled in.
+- **39 of 51 tests implemented**: all 28 ready and all 11 helper tests (including a DeLong implementation validated against a bootstrap), each with assumption checks, effect sizes, a cross-check, and a unit test (`uv run whichtest list`).
+- 12 judgment tests are still to do. They will refuse to run until `spec.decisions` is filled in.
 - No skill yet.
 
-Next: the 11 helper tests (incl. DeLong), then the skill.
+Next: the skill, then the 12 judgment tests.

@@ -198,3 +198,86 @@ def oneway_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
         warnings=warnings,
         extra={"eta_sq": eta.value, "welch": {"F": float(welch.statistic), "df": (float(welch.df_num), float(welch.df_denom)), "p": float(welch.pvalue)}},
     )
+
+
+# ---------------------------------------------------------------------------
+# Repeated-measures ANOVA (helper)
+# ---------------------------------------------------------------------------
+from ..data import blocks  # noqa: E402
+from ..result import CheckResult  # noqa: E402
+
+
+@procedure("rm_anova", requires=("columns|outcome",))
+def rm_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
+    from statsmodels.stats.anova import AnovaRM
+
+    m = blocks(df, spec)
+    if m.shape[1] < 3:
+        raise SpecError("rm_anova needs at least three levels; use paired_t for two")
+    n, k = m.shape
+    subj = m.index.name or "subject"
+    long = m.reset_index().rename(columns={m.index.name or "index": subj}).melt(id_vars=subj, var_name="time", value_name="y")
+    long["time"] = long["time"].astype(str)
+    res = AnovaRM(long, depvar="y", subject=subj, within=["time"]).fit()
+    F, df1, df2, p = (float(res.anova_table.loc["time", c]) for c in ("F Value", "Num DF", "Den DF", "Pr > F"))
+
+    cc = None
+    extra: dict = {}
+    sph = checks.manual("sphericity", "Sphericity (Mauchly's test is in pingouin)", "pingouin not installed")
+    eff = None
+    p_gg = None
+    try:
+        import pingouin as pg
+
+        rm = pg.rm_anova(data=long, dv="y", within="time", subject=subj, correction=True, detailed=True)
+        row = rm.iloc[0]
+        cc = compare(
+            "pingouin.rm_anova",
+            "The uncorrected F should match AnovaRM. pingouin adds the Greenhouse–Geisser correction that statsmodels lacks.",
+            {"F": F, "p": p},
+            {"F": float(row["F"]), "p": float(row["p_unc"])},
+        )
+        p_gg = float(row["p_GG_corr"]) if "p_GG_corr" in rm.columns else None
+        eps = float(row["eps"]) if "eps" in rm.columns else None
+        ss_t, ss_e = float(row["SS"]), float(rm.iloc[1]["SS"])
+        eff = Estimate("partial η²", ss_t / (ss_t + ss_e), note=f"generalized η² = {float(row['ng2']):.3f}" if "ng2" in rm.columns else "")
+        sp = pg.sphericity(data=long, dv="y", within="time", subject=subj)
+        sph = CheckResult("sphericity", "Sphericity (Mauchly's test)", bool(sp.spher), float(sp.W), float(sp.pval), f"Mauchly W = {sp.W:.3f}; Greenhouse–Geisser ε = {eps:.3f}" if eps is not None else f"Mauchly W = {sp.W:.3f}")
+        extra = {"greenhouse_geisser": {"eps": eps, "p": p_gg}}
+    except ImportError:
+        pass
+    # residuals of the additive subject + time model
+    vals = m.to_numpy(float)
+    resid = vals - vals.mean(1, keepdims=True) - vals.mean(0, keepdims=True) + vals.mean()
+    dropped = m.attrs.get("dropped", 0)
+    chk = [
+        sph,
+        CheckResult("balance", "Every subject has every level", bool(dropped == 0), None, None, f"{dropped} incomplete subject(s) dropped of {m.attrs.get('n_total', n)}" + ("; a mixed model (lmm) handles missing visits" if dropped else "")),
+        checks.shapiro(resid.ravel(), "residual_normality", "Residuals roughly normal", spec.alpha),
+    ]
+    warnings = []
+    if sph.passed is False and p_gg is not None:
+        warnings.append(f"Sphericity violated: report the Greenhouse–Geisser corrected p = {p_gg:.4g}.")
+    from itertools import combinations
+
+    from statsmodels.stats.multitest import multipletests
+
+    pairs = list(combinations(range(k), 2))
+    ps = [stats.ttest_rel(vals[:, i], vals[:, j]).pvalue for i, j in pairs]
+    adj = multipletests(ps, method="holm")[1]
+    post = {"method": "pairwise paired t-tests, Holm-adjusted", "pairs": [{"a": str(m.columns[i]), "b": str(m.columns[j]), "p": float(pp), "p_adj": float(q)} for (i, j), pp, q in zip(pairs, ps, adj)]}
+    return TestResult(
+        test="rm_anova",
+        n=int(n),
+        statistic_name="F",
+        statistic=F,
+        p=p,
+        df=(df1, df2),
+        estimates=[Estimate(f"mean[{c}]", float(m[c].mean())) for c in m.columns],
+        effect_size=eff,
+        checks=chk,
+        cross_check=cc,
+        post_hoc=post,
+        warnings=warnings,
+        extra=extra,
+    )

@@ -218,7 +218,7 @@ def compare(
             comps.append(Comparison(q, a, b, False, "missing value"))
             continue
         a, b = float(a), float(b)
-        if kind == "direction" and q == "direction":
+        if kind == "direction" and q.startswith("direction"):
             ok = (a > 0) == (b > 0) or (a == 0 and b == 0)
             rule = "same sign"
         elif kind == "direction" and q.startswith("p"):

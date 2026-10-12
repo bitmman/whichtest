@@ -41,4 +41,16 @@ def clinical(rng):
     df["o2"] = np.where(rng.random(n) < 0.7, df.o1, rng.integers(0, 3, n))
     df["time"] = rng.exponential(np.where(df.group == "trt", 15, 10))
     df["event"] = (rng.random(n) > 0.3).astype(int)
+    # helper-test columns
+    df["yord"] = pd.cut(df.x + 0.6 * (df.group == "trt") + rng.logistic(size=n), [-np.inf, -0.8, 0.6, np.inf], labels=[0, 1, 2]).astype(int)
+    df["bmi"] = rng.normal(26, 4, n)
+    df["y1"] = rng.normal(size=n) + 0.7 * (df.group == "trt") + 0.02 * df.age
+    df["y2"] = 0.5 * df.y1 + rng.normal(size=n)
+    df["y3"] = rng.normal(size=n) + 0.3 * df.x
+    df["m1"] = rng.normal(100, 15, n)
+    df["m2"] = df.m1 + 2 + rng.normal(0, 5, n)
+    df["truth"] = (rng.random(n) < 0.4).astype(int)
+    df["score_a"] = df.truth + rng.normal(size=n)
+    df["score_b"] = 0.5 * df.truth + rng.normal(size=n)
+    df["test_pos"] = (df.score_a > 0.5).astype(int)
     return df

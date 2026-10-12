@@ -36,6 +36,7 @@ _MODULES = (
     "whichtest.procedures.survival",
     "whichtest.procedures.correlation",
     "whichtest.procedures.agreement",
+    "whichtest.procedures.multivariate",
 )
 _loaded = False
 

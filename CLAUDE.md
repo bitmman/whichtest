@@ -45,9 +45,10 @@ Design work so far happened in a claude.ai chat on 2026-10-12. The interactive t
   - `registry.py` — `@procedure(test_id, requires=..., decisions=...)` decorator and `run(spec, df)`; judgment tests refuse to run unless `spec.decisions` has every key the procedure declares.
   - `data.py` — column binding helpers (`groups`, `paired`, `blocks`, `contingency_table`). Wide and long repeated-measures layouts are both accepted.
   - `checks.py`, `effects.py` — shared assumption checks and effect sizes.
-  - `procedures/` — one module per family. Each procedure is `fn(df, spec) -> TestResult` and must set `checks` and `cross_check`.
+  - `delong.py` — DeLong AUC variance and paired AUC comparison (not in any library).
+  - `procedures/` — one module per family (`multivariate.py` holds MANOVA / MANCOVA / multivariate regression). Each procedure is `fn(df, spec) -> TestResult` and must set `checks` and `cross_check`.
   - `cli.py` — `list`, `show`, `resolve`, `ask` (terminal wizard), `check`, `run`.
-- `tests/` — pytest. `test_procedures.py` runs every ready test on one synthetic dataset and asserts the cross-check agrees; the exact identities listed under "Verify before trusting" are separate tests.
+- `tests/` — pytest. `test_procedures.py` runs every ready and helper test on one synthetic dataset and asserts the cross-check agrees; the exact identities listed under "Verify before trusting" are separate tests.
 - `examples/` — synthetic `trial.csv` and three specs.
 - `taxonomy.json` — the full decision tree as data. **Source of truth for test selection.** Large (~80 KB): read it with tools when needed rather than importing it into context.
   - `nodes`: question id → `{ q, key, opts }`. Each option has `val` (the spec value for that answer) and `to` (next node id, or `L:<test_id>`).
@@ -132,17 +133,24 @@ The code snippets in `taxonomy.json` were written from library knowledge, not ex
 - `krippendorff` has no `__version__`.
 - Pins: `scipy>=1.11` (CI on `ttest_ind` results), `statsmodels>=0.14`.
 
-Still unverified (helper and judgment tests):
+**Verified 2026-10-12, helper tests:** all 11 run. Deviations found:
+
+- `OrderedModel.from_formula('y ~ 0 + ...')` raises "There should not be a constant" as soon as a categorical predictor is present (patsy full-codes it). Build the design with an intercept via `patsy.dmatrices` and drop the `Intercept` column instead.
+- `pingouin.sphericity`, `rm_anova(correction=True, detailed=True)`, `box_m`, `partial_corr`, `multivariate_normality` all exist with the documented arguments. `partial_corr` returns the p-value as `p-val`.
+- `phreg(..., ties='efron')` matches `lifelines.CoxPHFitter` to about 1e-5 (statsmodels stops its optimizer a little earlier); compare at `rtol=1e-4`.
+- `statsmodels.graphics.mean_diff_plot` draws its limits with the **population** SD (`ddof=0`); the reported limits use `ddof=1`, so compare like with like.
+- `sklearn.metrics.confusion_matrix` needs `labels=[0, 1]` or a single-class input collapses to a 1×1 matrix.
+
+Still unverified (judgment tests):
 
 - statsmodels `phreg(...).fit(groups=...)` for cluster-robust Cox standard errors.
-- `OrderedModel.from_formula` with the `0 +` (no intercept) convention.
 - Signatures of `smf.ordinal_gee` and `smf.nominal_gee`.
-- pingouin function names and arguments (`sphericity`, `rm_anova`, `friedman`, `cochran`, `box_m`, `partial_corr`, `intraclass_corr`).
+- `pingouin.intraclass_corr`.
 - Exact-agreement cross-checks (paired t vs one-sample t on differences, Spearman vs Pearson on ranks, AUC vs Mann–Whitney U / (n₁n₀), exact McNemar vs binomial on discordant pairs, logit vs binomial GLM, point-biserial vs Student's t) are unit tests in `tests/test_procedures.py` and pass.
 
 Known holes in the Python ecosystem:
 
-- DeLong paired-AUC test has no implementation in scipy, statsmodels or scikit-learn. Write it once (fast DeLong, Sun & Xu 2014) and validate it against a paired bootstrap.
+- DeLong paired-AUC test has no implementation in scipy, statsmodels or scikit-learn. Written in `delong.py` (fast DeLong, Sun & Xu 2014) and validated against a paired bootstrap.
 - Fine–Gray subdistribution hazards: not in statsmodels or lifelines.
 - Aligned rank transform (ART) ANOVA: no maintained Python port.
 
@@ -153,7 +161,7 @@ Started 2026-10-12 on the user's go-ahead.
 1. ✅ Spec schema in code (pydantic), validated against `taxonomy.json`.
 2. ✅ Pipeline registry: `test_id → procedure`, each returning a structured result.
 3. ✅ The 28 `ready` tests, each with a unit test where the cross-check must agree.
-4. ⬜ The 11 `helper` tests, including DeLong.
+4. ✅ The 11 `helper` tests, including DeLong (`delong.py`, fast DeLong after Sun & Xu 2014; validated against sklearn's AUC and a stratified paired bootstrap in `tests/test_delong.py`).
 5. ⬜ The skill: a SKILL.md that walks the taxonomy questions, records its reasoning, and emits a spec.
 6. ⬜ The 12 `judgment` tests, gated on explicit human-decision fields in the spec.
 

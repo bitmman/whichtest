@@ -264,3 +264,87 @@ def mnlogit(df: pd.DataFrame, spec: Spec) -> TestResult:
         cross_check=cc,
         extra={"formula": f, "categories": [str(c) for c in cats.categories], "reference": ref},
     )
+
+
+# ---------------------------------------------------------------------------
+# Ordinal logistic regression (helper)
+# ---------------------------------------------------------------------------
+@procedure("ordinal_logit", requires=("outcome|formula",))
+def ordinal_logit(df: pd.DataFrame, spec: Spec) -> TestResult:
+    import patsy
+    from statsmodels.miscmodels.ordinal_model import OrderedModel
+
+    f = _formula(spec, df)
+    yname = spec.variables.outcome or f.split("~")[0].strip()
+    d = df.dropna(subset=[yname]).copy()
+    # outcome: ordered integers, or ordered categories given in params.levels
+    levels = spec.params.get("levels")
+    if levels is not None:
+        cats = pd.Categorical(d[yname], categories=levels, ordered=True)
+        if cats.isna().any():
+            raise SpecError(f"values in {yname!r} outside params.levels {levels}")
+        d[yname] = cats.codes
+    elif not pd.api.types.is_numeric_dtype(d[yname]):
+        raise SpecError(f"{yname!r} must be integer-coded or params.levels must give the ordered categories")
+    # the `0 +` convention in the taxonomy breaks with categorical predictors (patsy full-codes them);
+    # build the design with an intercept and drop that column instead.
+    y, X = patsy.dmatrices(f, d, return_type="dataframe")
+    X = X.drop(columns="Intercept", errors="ignore")
+    ycodes = d.loc[X.index, yname].astype(int)
+    n_levels = int(ycodes.nunique())
+    if n_levels < 3:
+        raise SpecError("ordinal_logit needs at least three outcome levels; use logistic for two")
+    model = OrderedModel(ycodes.to_numpy(), X, distr=spec.params.get("distr", "logit"))
+    res = model.fit(method="bfgs", disp=0, maxiter=1000)
+    k_x = X.shape[1]
+    slopes = res.params[:k_x]
+    bse = res.bse[:k_x]
+    ci = res.conf_int(alpha=1 - spec.ci_level)
+    ests = [Estimate(f"cumulative OR {nm}", float(np.exp(slopes.iloc[i])), (float(np.exp(ci.iloc[i, 0])), float(np.exp(ci.iloc[i, 1]))), spec.ci_level, f"p = {float(res.pvalues.iloc[i]):.3g}") for i, nm in enumerate(X.columns)]
+    # cross-check / proportional odds: binary logits at every cut-point
+    cuts = sorted(ycodes.unique())[:-1]
+    per_cut = {}
+    for c in cuts:
+        b = (ycodes > c).astype(int).to_numpy()
+        try:
+            per_cut[c] = sm.Logit(b, sm.add_constant(X, has_constant="add")).fit(disp=0, maxiter=200).params.iloc[1:]
+        except Exception:
+            continue
+    primary = {f"direction[{nm}]": float(slopes.iloc[i]) for i, nm in enumerate(X.columns)}
+    secondary = {f"direction[{nm}]": float(np.mean([pc.iloc[i] for pc in per_cut.values()])) if per_cut else None for i, nm in enumerate(X.columns)}
+    cc = compare(
+        "binary logistic regressions at each cut-point",
+        "Slopes should be roughly constant across cut-points. If they drift, proportional odds is doubtful.",
+        primary,
+        secondary,
+        kind="direction",
+        detail="direction of each slope compared with the mean cut-point slope",
+    )
+    # proportional odds: spread of cut-point slopes relative to the ordinal SE
+    worst = 0.0
+    worst_name = ""
+    for i, nm in enumerate(X.columns):
+        vals = [float(pc.iloc[i]) for pc in per_cut.values()]
+        if len(vals) >= 2 and bse.iloc[i] > 0:
+            spread = (max(vals) - min(vals)) / float(bse.iloc[i])
+            if spread > worst:
+                worst, worst_name = spread, nm
+    po = CheckResult("proportional_odds", "Proportional odds: slopes similar across cut-points", bool(worst < 2.0), worst, None, f"largest cut-point slope spread = {worst:.2f} SE ({worst_name})" if worst_name else "could not fit cut-point models")
+    counts = ycodes.value_counts().sort_index()
+    sparse = CheckResult("sparse_levels", "Every outcome level has enough observations", bool(counts.min() >= 10), float(counts.min()), None, "counts per level: " + ", ".join(f"{i}: {c}" for i, c in counts.items()))
+    lr = float(2 * (res.llf - res.model.loglike(np.r_[np.zeros(k_x), res.params[k_x:]]))) if k_x else None
+    from scipy import stats as _st
+
+    return TestResult(
+        test="ordinal_logit",
+        n=int(len(ycodes)),
+        statistic_name="LR χ² (slopes = 0)",
+        statistic=lr,
+        p=float(_st.chi2.sf(lr, k_x)) if lr is not None else None,
+        df=float(k_x),
+        estimates=ests,
+        effect_size=Estimate("McFadden pseudo-R²", float(1 - res.llf / res.llnull) if hasattr(res, "llnull") else None),
+        checks=[po, sparse],
+        cross_check=cc,
+        extra={"formula": f, "thresholds": {str(nm): float(v) for nm, v in zip(res.model.exog_names[k_x:], res.params[k_x:])}, "cut_point_slopes": {str(c): {str(nm): float(v) for nm, v in pc.items()} for c, pc in per_cut.items()}},
+    )
