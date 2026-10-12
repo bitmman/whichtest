@@ -1,0 +1,38 @@
+import json
+from pathlib import Path
+
+from whichtest.cli import main
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_list_and_show(capsys):
+    assert main(["list", "--status", "ready"]) == 0
+    out = capsys.readouterr().out
+    assert "indep_t" in out and "yes" in out
+    assert main(["show", "km_logrank"]) == 0
+    assert "lifelines" in capsys.readouterr().out
+
+
+def test_resolve_outputs_spec(capsys):
+    assert main(["resolve", "goal=association", "variable_types=both_continuous_linear"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["test"] == "pearson" and spec["status"] == "ready"
+
+
+def test_check_and_run_examples(capsys, tmp_path):
+    assert main(["check", str(ROOT / "examples" / "spec_ancova.json")]) == 0
+    out = tmp_path / "res.json"
+    assert main(["run", str(ROOT / "examples" / "spec_responders.json"), str(ROOT / "examples" / "trial.csv"), "--out", str(out)]) == 0
+    res = json.loads(out.read_text())
+    assert res["test"] == "two_by_two" and res["cross_check"]["agrees"]
+    assert main(["run", str(ROOT / "examples" / "spec_table_only.json")]) == 0
+    assert "McNemar" in capsys.readouterr().out
+
+
+def test_ask_wizard(monkeypatch, capsys, tmp_path):
+    answers = iter(["1", "1", "2"])  # single outcome → continuous → paired
+    monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+    out = tmp_path / "spec.json"
+    assert main(["ask", "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["test"] == "paired_t"

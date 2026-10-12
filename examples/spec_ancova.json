@@ -1,0 +1,6 @@
+{
+  "test": "multiple_reg",
+  "design": {"goal": "single_outcome", "outcome_type": "continuous", "structure": "independent", "predictors": "multiple_mixed"},
+  "variables": {"outcome": "sbp_week12", "predictors": ["arm", "sbp_baseline", "age"], "categorical": ["arm"]},
+  "reasoning": ["Continuous outcome at week 12, adjusted for its baseline and age: ANCOVA framing of a two-arm trial."]
+}

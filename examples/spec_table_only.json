@@ -1,0 +1,5 @@
+{
+  "test": "mcnemar",
+  "params": {"table": [[20, 5], [12, 30]]},
+  "reasoning": ["Same patients classified before and after; only the paired 2×2 table is available."]
+}

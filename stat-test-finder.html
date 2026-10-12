@@ -1,0 +1,1430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Statistical test finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EDF1EF; --surface:#F7F9F8; --code-bg:#E2E8E6; --ink:#18232D; --ink-2:#4A5864; --rule:#C6D0CF;
+  --marker:#F4DA6B; --marker-ink:#18232D; --accent:#1F4E79;
+  --ready:#2C6A4C; --helper:#8B5B00; --judgment:#8F2C4C;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#141A1F; --surface:#1B232A; --code-bg:#202A32; --ink:#E3E9EB; --ink-2:#9EABB4; --rule:#33404A;
+    --marker:#5E5215; --marker-ink:#FFF4C2; --accent:#93BCE3;
+    --ready:#79C29C; --helper:#E2B455; --judgment:#E68AA7;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#141A1F; --surface:#1B232A; --code-bg:#202A32; --ink:#E3E9EB; --ink-2:#9EABB4; --rule:#33404A;
+  --marker:#5E5215; --marker-ink:#FFF4C2; --accent:#93BCE3;
+  --ready:#79C29C; --helper:#E2B455; --judgment:#E68AA7;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none !important}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100%;background:var(--paper);color:var(--ink);
+  font-family:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  font-size:1.0625rem;line-height:1.55}
+code,pre{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.84rem}
+button{font:inherit;color:inherit}
+.wrap{max-width:1180px;margin:0 auto;padding:0 clamp(1rem,3vw,2rem)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:.5rem 2rem;padding-top:1.6rem;border-bottom:1px solid var(--rule)}
+.top h1{font-size:1.3rem;margin:0;letter-spacing:-.01em}
+.lede{margin:.1rem 0 1rem;color:var(--ink-2)}
+.tabs{display:flex;gap:1.6rem}
+.tab{background:none;border:0;padding:.6rem 0;margin-bottom:-1px;font-weight:700;color:var(--ink-2);border-bottom:3px solid transparent;cursor:pointer}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+/* find view */
+.find{display:grid;grid-template-columns:minmax(200px,270px) minmax(0,1fr);gap:clamp(1.5rem,4vw,4rem);padding-block:2.25rem 3.5rem}
+.trail h2{font-size:.95rem;color:var(--ink-2);margin:0 0 .9rem}
+.trail ol{list-style:none;margin:0;padding:0}
+.trail li{position:relative;padding:0 0 1.1rem 1.65rem}
+.trail li::before{content:"";position:absolute;left:.37rem;top:1rem;bottom:-.2rem;width:2px;background:var(--rule)}
+.trail li:last-child::before{display:none}
+.trail li::after{content:"";position:absolute;left:.04rem;top:.33rem;width:.8rem;height:.8rem;border-radius:50%;border:2px solid var(--ink);background:var(--ink)}
+.trail li.now::after{background:var(--paper);border-style:dashed}
+.trail li.end::after{background:var(--marker)}
+.trail button{all:unset;display:block;cursor:pointer;border-radius:4px}
+.trail button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.trail button:hover .a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.trail .q{display:block;font-size:.85rem;color:var(--ink-2)}
+.trail .a{display:block;font-weight:700;line-height:1.35}
+.pending{color:var(--ink-2);font-weight:400 !important;font-style:italic}
+.mk{background:linear-gradient(to top,var(--marker) 0 42%,transparent 42%);padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.mk.full{background:var(--marker);color:var(--marker-ink);padding:.05em .3em}
+
+.stage > *{animation:enter .2s ease-out}
+@keyframes enter{from{opacity:0;transform:translateY(4px)}}
+@media (prefers-reduced-motion:reduce){.stage > *{animation:none}}
+.stage h2,.lh h2{font-size:clamp(1.55rem,1.1rem + 1.6vw,2.15rem);line-height:1.18;margin:0 0 .6rem;max-width:30ch;letter-spacing:-.015em}
+.stage h2:focus,.detail h2:focus{outline:none}
+.help{color:var(--ink-2);max-width:62ch;margin:0}
+.opts{list-style:none;margin:1.5rem 0 0;padding:0;border-top:1px solid var(--rule);max-width:46rem}
+.opts li{border-bottom:1px solid var(--rule)}
+.opt{display:grid;grid-template-columns:2.2rem 1fr;gap:.9rem;width:100%;text-align:left;background:none;border:0;padding:1rem .75rem 1rem .25rem;cursor:pointer;align-items:start}
+.opt:hover{background:var(--surface)}
+.opt:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+.key{display:inline-grid;place-items:center;width:1.7rem;height:1.7rem;border:1.5px solid var(--rule);border-radius:5px;font-size:.85rem;color:var(--ink-2);margin-top:.05rem}
+.opt:hover .key{border-color:var(--ink);color:var(--ink)}
+.lbl{display:block;font-weight:700;font-size:1.1rem;line-height:1.3}
+.sub{display:block;color:var(--ink-2);font-size:.95rem;margin-top:.2rem}
+.nav{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1.25rem;margin-top:1.6rem}
+.txtbtn{background:none;border:0;padding:.35rem 0;color:var(--accent);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+.btn{font-weight:700;background:var(--ink);color:var(--paper);border:0;border-radius:6px;padding:.6rem 1rem;cursor:pointer}
+.txtbtn:focus-visible,.btn:focus-visible,.copy:focus-visible,.fbtn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.hint{color:var(--ink-2);font-size:.85rem;margin-left:auto}
+@media (hover:none){.hint{display:none}}
+
+/* leaf detail */
+.meta{display:flex;flex-wrap:wrap;gap:.4rem 1.1rem;align-items:center;margin:.2rem 0 1.6rem;color:var(--ink-2)}
+.ready{--st:var(--ready)} .helper{--st:var(--helper)} .judgment{--st:var(--judgment)}
+.badge{display:inline-flex;align-items:center;gap:.45rem;font-weight:700;color:var(--st)}
+.shape{flex:none;display:inline-block;width:.72rem;height:.72rem;border-radius:50%;background:var(--st)}
+.helper .shape{background:linear-gradient(90deg,var(--st) 50%,transparent 50%);box-shadow:inset 0 0 0 2px var(--st)}
+.judgment .shape{border-radius:1px;transform:rotate(45deg) scale(.88)}
+.facts{display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:1.1rem 1.5rem;margin:0;max-width:52rem}
+.facts dt{font-weight:700;color:var(--ink-2);font-size:.95rem;padding-top:.05rem}
+.facts dd{margin:0;min-width:0}
+.facts dd p{margin:.55rem 0 0}
+.facts dd > p:first-child{margin-top:0}
+.checks{margin:0;padding-left:1.1rem}
+.checks li + li{margin-top:.5rem}
+.checks code{display:block;margin-top:.15rem;color:var(--ink-2);white-space:pre-wrap;overflow-wrap:anywhere}
+.code{position:relative;background:var(--code-bg);border-radius:6px;margin-top:.1rem}
+.code + p{margin-top:.6rem}
+.code pre{margin:0;padding:.85rem 4.6rem .85rem 1rem;overflow-x:auto;line-height:1.55}
+.copy{position:absolute;top:.45rem;right:.45rem;font-size:.8rem;font-weight:700;background:var(--surface);border:1px solid var(--rule);border-radius:4px;padding:.15rem .55rem;cursor:pointer}
+.link{background:none;border:0;padding:0;margin-top:.35rem;color:var(--accent);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px;text-align:left}
+.link:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.small{font-size:.88rem;color:var(--ink-2)}
+.imports{margin-top:1.6rem;max-width:52rem}
+.imports code{font-size:.8rem}
+@media (max-width:640px){.facts{grid-template-columns:1fr;gap:.25rem}.facts dd{margin-bottom:1.1rem}.code pre{padding:2.1rem 1rem .85rem}}
+
+/* map view */
+.mapbar{padding-block:2rem 1.4rem;border-bottom:1px solid var(--rule)}
+.covline{margin:0 0 .65rem;font-size:1.05rem;max-width:62ch}
+.bar{display:flex;gap:2px;height:.55rem;border-radius:99px;overflow:hidden;max-width:46rem}
+.bar span{background:var(--st)}
+.controls{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1.2rem;align-items:flex-end}
+.filters{display:flex;flex-wrap:wrap;gap:.6rem}
+.fbtn{text-align:left;background:var(--surface);border:1.5px solid var(--rule);border-radius:8px;padding:.5rem .8rem;cursor:pointer;max-width:15.5rem}
+.fbtn[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.fbtn .ft{display:flex;align-items:center;gap:.45rem;font-weight:700}
+.fbtn .fd{display:block;font-size:.82rem;color:var(--ink-2);margin-top:.15rem;line-height:1.35}
+.fbtn.all .shape{background:none;box-shadow:inset 0 0 0 2px var(--ink-2)}
+.search{display:flex;flex-direction:column;gap:.25rem;margin-left:auto;min-width:min(15rem,100%)}
+.search label{font-size:.85rem;color:var(--ink-2);font-weight:700}
+.search input{font:inherit;padding:.5rem .7rem;border:1.5px solid var(--rule);border-radius:6px;background:var(--surface);color:var(--ink)}
+.search input:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+.map{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,30rem);gap:clamp(1.5rem,3vw,3rem);padding-block:1.5rem 3.5rem;align-items:start}
+.tree{min-width:0}
+.rootq{font-weight:700;margin:0 0 .4rem}
+.branch{list-style:none;margin:0;padding:0 0 0 1.05rem;border-left:1px solid var(--rule)}
+.tree > .branch{border-left:0;padding-left:0}
+details > summary{list-style:none;cursor:pointer;padding:.3rem .4rem .3rem 1.15rem;position:relative;border-radius:4px;display:flex;flex-wrap:wrap;gap:.1rem .6rem;align-items:baseline}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"";position:absolute;left:.2rem;top:.72rem;border:5px solid transparent;border-left-color:var(--ink-2);border-right:0}
+details[open] > summary::before{transform:rotate(90deg);transform-origin:30% 50%}
+summary:hover{background:var(--surface)}
+summary:focus-visible,.leafbtn:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+.via{color:var(--ink-2)}
+.via.strong{color:var(--ink);font-weight:700}
+.cq{color:var(--ink-2);font-size:.92rem}
+.leafbtn{all:unset;box-sizing:border-box;display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem .6rem;width:100%;padding:.28rem .4rem .28rem 1.15rem;border-radius:4px;cursor:pointer}
+.leafbtn:hover{background:var(--surface)}
+.leafbtn[aria-current]{background:var(--marker);color:var(--marker-ink)}
+.leafbtn[aria-current] .via{color:inherit}
+.tname{display:inline-flex;align-items:center;gap:.45rem;font-weight:700}
+.on-path > summary .via{background:linear-gradient(to top,var(--marker) 0 42%,transparent 42%)}
+.detail{position:sticky;top:calc(env(safe-area-inset-top,0px) + 1rem);max-height:calc(100vh - 2rem - env(safe-area-inset-top,0px));overflow:auto;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:1.25rem 1.3rem 1.5rem}
+.detail h2{font-size:1.45rem;margin:0 0 .5rem}
+.detail .facts{grid-template-columns:1fr;gap:.2rem}
+.detail .facts dd{margin-bottom:1.1rem}
+.detail .code{background:var(--paper)}
+.detail .copy{background:var(--surface)}
+.detail .code pre{padding:2.1rem 1rem .85rem}
+.ask .nav{max-width:46rem}
+.empty{color:var(--ink-2);margin:0}
+@media (max-width:900px){.map{grid-template-columns:1fr}.detail{position:static;max-height:none}.search{margin-left:0}}
+@media (max-width:820px){
+  .find{grid-template-columns:1fr;gap:1.25rem;padding-top:1.5rem}
+  .trail h2{margin-bottom:.5rem}
+  .trail ol{display:flex;flex-wrap:wrap;gap:.4rem}
+  .trail li{padding:0}
+  .trail li::before,.trail li::after{display:none}
+  .trail .q{display:none}
+  .trail .a{font-size:.92rem;border:1px solid var(--rule);border-radius:99px;padding:.15rem .6rem}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Statistical test finder</h1>
+      <p class="lede">From study design to the test your pipeline should run, and how to check it.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Views">
+      <button class="tab" role="tab" id="tab-find" aria-controls="view-find" aria-selected="true">Find a test</button>
+      <button class="tab" role="tab" id="tab-map" aria-controls="view-map" aria-selected="false" tabindex="-1">Full map</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-find" role="tabpanel" aria-labelledby="tab-find">
+      <div class="find">
+        <nav class="trail" aria-labelledby="trail-h">
+          <h2 id="trail-h">Your path</h2>
+          <ol id="trail"></ol>
+        </nav>
+        <div class="stage" id="stage" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section id="view-map" role="tabpanel" aria-labelledby="tab-map" hidden>
+      <div class="mapbar">
+        <p class="covline" id="covline"></p>
+        <div class="bar" id="bar" role="img"></div>
+        <div class="controls">
+          <div class="filters" id="filters" role="group" aria-label="Filter by readiness"></div>
+          <div class="search">
+            <label for="q">Search tests</label>
+            <input id="q" type="search" placeholder="e.g. kappa, statsmodels, survival" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div class="map">
+        <div class="tree" id="tree"></div>
+        <aside class="detail" id="mapDetail" aria-live="polite">
+          <p class="empty">Pick a test in the map to see how to check, run and cross-check it.</p>
+        </aside>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const NODES = {
+  root: {
+    short: "Question", key: "goal",
+    q: "What are you trying to find out?",
+    help: "Pick the closest match. You can step back to any earlier answer.",
+    opts: [
+      { tl: "One outcome", label: "How one outcome differs or depends on something", sub: "Group comparisons, regression, survival. One outcome variable.", val: "single_outcome", to: "out_type" },
+      { tl: "Several outcomes", label: "How several outcomes differ together", sub: "Two or more outcome variables analyzed jointly.", val: "multiple_outcomes", to: "mv" },
+      { tl: "Association", label: "Whether two variables are related", sub: "Correlation or association, with no outcome–predictor split.", val: "association", to: "assoc" },
+      { tl: "Agreement or accuracy", label: "How well raters, methods, or a diagnostic test agree", sub: "Reliability, method comparison, diagnostic accuracy.", val: "agreement_accuracy", to: "agree" }
+    ]
+  },
+  out_type: {
+    short: "Outcome", key: "outcome_type",
+    q: "What type is the outcome variable?",
+    help: "If a continuous measure was split into categories, choose continuous. Dichotomizing throws information away.",
+    opts: [
+      { tl: "Continuous", label: "Continuous", sub: "Measured on a scale: blood pressure, HbA1c, length of stay.", val: "continuous", to: "cont_struct" },
+      { tl: "Ordinal", label: "Ordinal", sub: "Ordered categories: Likert items, tumor grade, pain scale.", val: "ordinal", to: "ord_struct" },
+      { tl: "Binary", label: "Binary", sub: "Two categories: readmitted or not, responder or not.", val: "binary", to: "bin_struct" },
+      { tl: "Nominal", label: "Nominal, three or more categories", sub: "Unordered categories: discharge destination, disease subtype.", val: "nominal", to: "nom_struct" },
+      { tl: "Count", label: "Count", sub: "Number of events: ED visits per year, lesions per scan.", val: "count", to: "count_struct" },
+      { tl: "Time to event", label: "Time to event", sub: "Time until an event happens, with some subjects censored.", val: "time_to_event", to: "surv" }
+    ]
+  },
+  cont_struct: {
+    short: "Structure", key: "structure",
+    q: "How are the observations structured?",
+    help: "This is the study-design axis. Treating paired or clustered data as independent makes standard errors too small.",
+    opts: [
+      { tl: "Independent", label: "Independent", sub: "Each subject contributes one measurement.", val: "independent", to: "cont_ind" },
+      { tl: "Paired", label: "Paired or matched", sub: "Two measurements per subject, or matched pairs.", val: "paired", to: "L:paired_t" },
+      { tl: "Repeated or clustered", label: "Repeated or clustered", sub: "Three or more measurements per subject, or subjects nested in sites.", val: "repeated_or_clustered", to: "cont_rep" }
+    ]
+  },
+  cont_ind: {
+    short: "Predictors", key: "predictors",
+    q: "What are the predictors?",
+    help: "A grouping variable is a categorical predictor, such as treatment arm.",
+    opts: [
+      { tl: "None", label: "None, compare with a reference value", sub: "A target, a norm, or a historical mean.", val: "none", to: "L:one_sample_t" },
+      { tl: "2 groups", label: "One grouping variable, two groups", val: "one_factor_2_levels", to: "L:indep_t" },
+      { tl: "3+ groups", label: "One grouping variable, three or more groups", val: "one_factor_3plus_levels", to: "L:oneway_anova" },
+      { tl: "2+ factors", label: "Two or more grouping variables", sub: "For example treatment × sex, including the interaction.", val: "two_plus_factors", to: "L:factorial_anova" },
+      { tl: "1 continuous", label: "One continuous predictor", val: "one_continuous", to: "L:simple_lin_reg" },
+      { tl: "Several predictors", label: "Several predictors, or groups plus covariates", sub: "Multiple regression, or ANCOVA.", val: "multiple_mixed", to: "L:multiple_reg" }
+    ]
+  },
+  cont_rep: {
+    short: "Repeated pattern", key: "repeated_pattern",
+    q: "What does the repeated structure look like?",
+    help: "Most clinical longitudinal data has missing visits, which usually points to a mixed model.",
+    opts: [
+      { tl: "Complete, one factor", label: "One within-subject factor, every subject complete", sub: "Same time points for everyone, no missing data.", val: "one_within_factor_complete", to: "L:rm_anova" },
+      { tl: "Missing or nested", label: "Missing visits, uneven timing, between-subject factors, or nesting", val: "unbalanced_or_nested", to: "L:lmm" },
+      { tl: "Population-averaged", label: "You want population-averaged effects", sub: "The average effect across the population, not per subject.", val: "population_averaged", to: "L:gee_cont" }
+    ]
+  },
+  ord_struct: {
+    short: "Structure", key: "structure",
+    q: "How are the observations structured?",
+    opts: [
+      { tl: "Independent", label: "Independent", sub: "Each subject contributes one measurement.", val: "independent", to: "ord_ind" },
+      { tl: "Paired", label: "Paired or matched", val: "paired", to: "L:wilcoxon_signed" },
+      { tl: "Repeated, complete", label: "Three or more conditions per subject, complete data", val: "repeated_complete", to: "L:friedman" },
+      { tl: "Clustered or longitudinal", label: "Clustered or longitudinal, with covariates", val: "clustered_longitudinal", to: "L:ordinal_gee" }
+    ]
+  },
+  ord_ind: {
+    short: "Predictors", key: "predictors",
+    q: "What are the predictors?",
+    opts: [
+      { tl: "None", label: "None, compare with a reference value", val: "none", to: "L:one_sample_wilcoxon" },
+      { tl: "2 groups", label: "One grouping variable, two groups", val: "one_factor_2_levels", to: "L:mann_whitney" },
+      { tl: "3+ groups", label: "One grouping variable, three or more groups", val: "one_factor_3plus_levels", to: "L:kruskal" },
+      { tl: "1 continuous or ordinal", label: "One continuous or ordinal predictor", val: "one_continuous_or_ordinal", to: "L:spearman" },
+      { tl: "Several predictors", label: "Several predictors", val: "multiple", to: "L:ordinal_logit" }
+    ]
+  },
+  bin_struct: {
+    short: "Structure", key: "structure",
+    q: "How are the observations structured?",
+    opts: [
+      { tl: "Independent", label: "Independent", sub: "Each subject contributes one measurement.", val: "independent", to: "bin_ind" },
+      { tl: "Paired", label: "Paired or matched", sub: "Same subjects measured twice, or matched pairs.", val: "paired", to: "L:mcnemar" },
+      { tl: "Repeated, complete", label: "Three or more conditions per subject, complete data", val: "repeated_complete", to: "L:cochran_q" },
+      { tl: "Clustered or longitudinal", label: "Clustered or longitudinal, with covariates", sub: "Patients within clinics, visits within patients.", val: "clustered_longitudinal", to: "L:gee_logit" }
+    ]
+  },
+  bin_ind: {
+    short: "Predictors", key: "predictors",
+    q: "What are the predictors?",
+    opts: [
+      { tl: "None", label: "None, compare with a reference proportion", val: "none", to: "L:binom_test" },
+      { tl: "2 groups", label: "One grouping variable, two groups", val: "one_factor_2_levels", to: "L:two_by_two" },
+      { tl: "3+ groups", label: "One grouping variable, three or more groups", val: "one_factor_3plus_levels", to: "L:chi_sq_indep" },
+      { tl: "Continuous or several", label: "A continuous predictor, or several predictors", val: "continuous_or_multiple", to: "L:logistic" }
+    ]
+  },
+  nom_struct: {
+    short: "Structure", key: "structure",
+    q: "How are the observations structured?",
+    opts: [
+      { tl: "Independent", label: "Independent", sub: "Each subject contributes one measurement.", val: "independent", to: "nom_ind" },
+      { tl: "Paired", label: "Paired", sub: "The same subjects classified twice.", val: "paired", to: "L:stuart_maxwell" },
+      { tl: "Clustered or longitudinal", label: "Clustered or longitudinal", val: "clustered_longitudinal", to: "L:nominal_gee" }
+    ]
+  },
+  nom_ind: {
+    short: "Predictors", key: "predictors",
+    q: "What are the predictors?",
+    opts: [
+      { tl: "None", label: "None, compare with an expected distribution", val: "none", to: "L:chi_gof" },
+      { tl: "1 categorical", label: "One categorical predictor", val: "one_categorical", to: "L:chi_sq_indep" },
+      { tl: "Continuous or several", label: "A continuous predictor, or several predictors", val: "continuous_or_multiple", to: "L:mnlogit" }
+    ]
+  },
+  count_struct: {
+    short: "Structure", key: "structure",
+    q: "How are the observations structured?",
+    opts: [
+      { tl: "Independent", label: "Independent", sub: "One count per subject.", val: "independent", to: "count_ind" },
+      { tl: "Repeated or clustered", label: "Repeated or clustered", sub: "Counts per visit, or subjects nested in sites.", val: "repeated_or_clustered", to: "L:gee_poisson" }
+    ]
+  },
+  count_ind: {
+    short: "Aim", key: "aim",
+    q: "What do you need to do with the counts?",
+    help: "Follow-up time usually differs between subjects. Model it as exposure rather than ignoring it.",
+    opts: [
+      { tl: "Compare 2 rates", label: "Compare event rates between two groups", val: "compare_two_rates", to: "L:poisson_2indep" },
+      { tl: "Model with predictors", label: "Model counts with predictors", sub: "Optionally with follow-up time as an exposure offset.", val: "regression", to: "L:poisson_reg" },
+      { tl: "Excess zeros", label: "Far more zeros than expected", sub: "Some subjects may never be at risk, such as never-users.", val: "excess_zeros", to: "L:zip" }
+    ]
+  },
+  surv: {
+    short: "Need", key: "survival_aim",
+    q: "What do you need from the survival analysis?",
+    help: "Censoring is what makes this survival data. If everyone was followed until the event, a continuous-outcome method may do.",
+    opts: [
+      { tl: "Compare groups", label: "Compare survival between groups", sub: "No adjustment for covariates.", val: "compare_groups", to: "L:km_logrank" },
+      { tl: "Adjusted hazard ratios", label: "Estimate hazard ratios, adjusted for covariates", val: "adjusted_hazard_ratios", to: "L:cox" },
+      { tl: "Competing events", label: "More than one event type can end follow-up", sub: "For example death before readmission.", val: "competing_events", to: "L:competing" },
+      { tl: "Clustered or non-PH", label: "Subjects nested in sites, or a covariate breaks proportional hazards", val: "clustered_or_stratified", to: "L:cox_cluster" }
+    ]
+  },
+  mv: {
+    short: "Aim", key: "multivariate_aim",
+    q: "What do you want to do with the outcomes?",
+    help: "If the several outcomes are one measure taken at several times, go back and choose one outcome with a repeated structure.",
+    opts: [
+      { tl: "Compare groups", label: "Compare groups on them", sub: "Several continuous outcomes, such as a panel of related labs.", val: "compare_groups", to: "L:manova" },
+      { tl: "Compare, adjusted", label: "Compare groups, adjusted for covariates", val: "compare_groups_adjusted", to: "L:mancova" },
+      { tl: "Predict them", label: "Predict them from continuous predictors", val: "predict_outcomes", to: "L:mv_reg" },
+      { tl: "Underlying construct", label: "Measure an underlying construct", sub: "The outcomes are items of a scale or questionnaire.", val: "latent_construct", to: "L:factor_sem" }
+    ]
+  },
+  assoc: {
+    short: "Variables", key: "variable_types",
+    q: "What kinds of variables are they?",
+    help: "Correlation describes association. To check whether two methods agree, go back and choose agreement.",
+    opts: [
+      { tl: "Both continuous, linear", label: "Both continuous, roughly linear", val: "both_continuous_linear", to: "L:pearson" },
+      { tl: "Monotonic or ordinal", label: "Monotonic, ordinal, or not normal", val: "monotonic_or_ordinal", to: "L:spearman" },
+      { tl: "Both categorical", label: "Both categorical", val: "both_categorical", to: "L:chi_sq_indep" },
+      { tl: "Binary and continuous", label: "One binary, one continuous", val: "binary_and_continuous", to: "L:point_biserial" },
+      { tl: "Adjusting for others", label: "Two continuous, adjusting for other variables", val: "adjusted_for_covariates", to: "L:partial_corr" }
+    ]
+  },
+  agree: {
+    short: "Task", key: "task",
+    q: "What are you assessing?",
+    opts: [
+      { tl: "2 raters, categories", label: "Two raters, categorical ratings", val: "two_raters_categorical", to: "L:cohen_kappa" },
+      { tl: "3+ raters, categories", label: "Three or more raters, categorical ratings", val: "multi_raters_categorical", to: "L:fleiss_kappa" },
+      { tl: "Method comparison", label: "Two methods measuring the same continuous quantity", sub: "A new device against a reference method.", val: "method_comparison", to: "L:bland_altman" },
+      { tl: "Continuous reliability", label: "Reliability of continuous ratings", sub: "Across raters, or test–retest.", val: "continuous_reliability", to: "L:icc" },
+      { tl: "Binary test", label: "A binary test against a gold standard", val: "binary_test_accuracy", to: "L:diag_binary" },
+      { tl: "Continuous score", label: "A continuous score against a gold standard", sub: "A biomarker, or a model's predicted probability.", val: "score_accuracy", to: "L:roc_auc" },
+      { tl: "Compare 2 AUCs", label: "Two scores' AUCs on the same patients", val: "paired_auc_comparison", to: "L:delong" }
+    ]
+  }
+};
+
+const LEAVES = {
+  one_sample_t: {
+    name: "One-sample t-test", family: "Parametric", status: "ready",
+    when: "Compare the mean of one continuous measure with a fixed reference value: a norm, a target, or a historical mean.",
+    checks: [
+      { k: "normality", t: "Values roughly normal (matters less above about 30 subjects)", c: "stats.shapiro(x)" },
+      { k: "outliers", t: "No extreme outliers driving the mean", c: "np.abs(stats.zscore(x)) > 3" }
+    ],
+    fb: { t: "Wilcoxon signed-rank against the reference value.", to: "one_sample_wilcoxon" },
+    run: "res = stats.ttest_1samp(x, popmean=mu0)\nres.confidence_interval()",
+    call: "scipy.stats.ttest_1samp",
+    cross: { c: "sm.stats.DescrStatsW(x).ttest_mean(mu0)", why: "Same test in a second library. The t statistic and p-value should match to many decimals." },
+    xcall: "statsmodels DescrStatsW.ttest_mean",
+    report: "Mean difference with 95% CI; Cohen's d = (mean − μ₀) / SD."
+  },
+  indep_t: {
+    name: "Independent-samples t-test (Welch)", family: "Parametric", status: "ready",
+    when: "Compare the means of a continuous outcome between two independent groups.",
+    checks: [
+      { k: "normality_by_group", t: "Each group roughly normal", c: "stats.shapiro(g1); stats.shapiro(g2)" },
+      { k: "independence", t: "One measurement per subject, no matching between groups" },
+      { k: "variance_info", t: "Unequal variances are fine: Welch doesn't assume them equal", c: "stats.levene(g1, g2)" }
+    ],
+    fb: { t: "Mann–Whitney U.", to: "mann_whitney" },
+    run: "stats.ttest_ind(g1, g2, equal_var=False)",
+    call: "scipy.stats.ttest_ind(equal_var=False)",
+    cross: { c: "from statsmodels.stats.weightstats import ttest_ind\nttest_ind(g1, g2, usevar='unequal')", why: "Same Welch test in statsmodels. Statistic, degrees of freedom and p-value should match." },
+    xcall: "statsmodels.stats.weightstats.ttest_ind(usevar='unequal')",
+    report: "Mean difference with 95% CI; Hedges' g.",
+    watch: "Don't choose between Student's and Welch's test from a Levene p-value. Welch costs almost nothing when variances are equal."
+  },
+  oneway_anova: {
+    name: "One-way ANOVA", family: "Parametric", status: "ready",
+    when: "Compare a continuous outcome across three or more independent groups.",
+    checks: [
+      { k: "residual_normality", t: "Residuals roughly normal", c: "stats.shapiro(m.resid)" },
+      { k: "equal_variance", t: "Similar variances across groups; if not, use Welch's ANOVA", c: "stats.levene(*groups)" }
+    ],
+    fb: { t: "Kruskal–Wallis if residuals aren't normal. Welch's ANOVA if only the variances differ.", to: "kruskal" },
+    run: "stats.f_oneway(*groups)\n\n# unequal variances\nfrom statsmodels.stats.oneway import anova_oneway\nanova_oneway(df['y'], groups=df['group'], use_var='unequal')",
+    call: "scipy.stats.f_oneway",
+    cross: { c: "m = smf.ols('y ~ C(group)', df).fit()\nsm.stats.anova_lm(m, typ=2)", why: "The regression framing gives the same F. It must equal scipy's." },
+    xcall: "statsmodels ols + anova_lm",
+    report: "η² or ω² from the ANOVA table.",
+    post: "Tukey HSD with statsmodels pairwise_tukeyhsd(df['y'], df['group']), cross-checked against scipy.stats.tukey_hsd."
+  },
+  factorial_anova: {
+    name: "Factorial ANOVA", family: "Parametric", status: "judgment",
+    when: "Two or more grouping factors, such as treatment × sex, with a continuous outcome and their interaction.",
+    checks: [
+      { k: "residual_normality", t: "Residuals roughly normal", c: "stats.shapiro(m.resid)" },
+      { k: "cell_variance", t: "Similar variances across cells", c: "stats.levene(*cells)" },
+      { k: "balance", t: "Count subjects per cell. Unbalanced designs change the answer", c: "pd.crosstab(df['a'], df['b'])" }
+    ],
+    fb: { t: "Heteroscedasticity-robust (HC3) standard errors, or a permutation test on the interaction. Rank-based ART has no maintained Python port.", k: "robust_or_permutation" },
+    run: "m = smf.ols('y ~ C(a) * C(b)', df).fit()\nsm.stats.anova_lm(m, typ=2)",
+    call: "statsmodels ols + anova_lm(typ=2)",
+    cross: { c: "# Type III needs sum-to-zero contrasts\nm3 = smf.ols('y ~ C(a, Sum) * C(b, Sum)', df).fit()\nsm.stats.anova_lm(m3, typ=3)", why: "In a balanced design Types II and III agree. If they don't, the design is unbalanced and you need to choose deliberately." },
+    xcall: "anova_lm(typ=3) with sum contrasts",
+    report: "Partial η² per effect; simple effects if the interaction matters.",
+    watch: "The sums-of-squares type, and whether main effects mean anything under an interaction, are judgment calls. The tool should show both, not pick silently."
+  },
+  simple_lin_reg: {
+    name: "Simple linear regression", family: "Regression model", status: "ready",
+    when: "Model a continuous outcome as a linear function of one continuous predictor.",
+    checks: [
+      { k: "linearity", t: "Linear relationship: plot residuals against fitted values" },
+      { k: "residual_normality", t: "Residuals roughly normal", c: "stats.shapiro(m.resid)" },
+      { k: "homoscedasticity", t: "Constant residual variance", c: "from statsmodels.stats.diagnostic import het_breuschpagan\nhet_breuschpagan(m.resid, m.model.exog)" },
+      { k: "influence", t: "No single point dominating the fit", c: "m.get_influence().cooks_distance[0]" }
+    ],
+    fb: { t: "Spearman correlation for a monotonic relationship, or HC3 standard errors for unequal variance.", to: "spearman" },
+    run: "stats.linregress(x, y)",
+    call: "scipy.stats.linregress",
+    cross: { c: "m = smf.ols('y ~ x', df).fit()\nm.params, m.pvalues", why: "Slope, intercept and p-value should match linregress exactly." },
+    xcall: "statsmodels ols",
+    report: "Slope with 95% CI; R²."
+  },
+  multiple_reg: {
+    name: "Multiple linear regression / ANCOVA", family: "Regression model", status: "ready",
+    when: "Continuous outcome with several predictors, or a group comparison adjusted for covariates (ANCOVA).",
+    checks: [
+      { k: "residual_normality", t: "Residuals roughly normal", c: "stats.shapiro(m.resid)" },
+      { k: "homoscedasticity", t: "Constant residual variance", c: "het_breuschpagan(m.resid, m.model.exog)" },
+      { k: "multicollinearity", t: "Predictors not too collinear (VIF under about 5)", c: "from statsmodels.stats.outliers_influence import variance_inflation_factor" },
+      { k: "homogeneous_slopes", t: "For ANCOVA, no group × covariate interaction", c: "smf.ols('y ~ C(group) * baseline', df).fit()" }
+    ],
+    fb: { t: "Heteroscedasticity-robust standard errors: .fit(cov_type='HC3').", k: "ols_hc3" },
+    run: "m = smf.ols('y ~ C(group) + age + baseline', df).fit()",
+    call: "statsmodels ols",
+    cross: { c: "np.linalg.lstsq(m.model.exog, m.model.endog, rcond=None)[0]", why: "A raw least-squares solve should reproduce m.params." },
+    xcall: "numpy.linalg.lstsq",
+    report: "Coefficients with 95% CI; adjusted R²; partial η² for the ANCOVA group effect.",
+    watch: "The covariate list comes from the design spec, fixed before seeing results. The tool shouldn't choose it."
+  },
+  paired_t: {
+    name: "Paired t-test", family: "Parametric", status: "ready",
+    when: "Two measurements on the same subjects (pre and post, left and right) or matched pairs, with a continuous outcome.",
+    checks: [
+      { k: "difference_normality", t: "Differences roughly normal", c: "stats.shapiro(after - before)" },
+      { k: "pair_alignment", t: "Pairs joined on subject ID, never on row order" }
+    ],
+    fb: { t: "Wilcoxon signed-rank on the paired differences.", to: "wilcoxon_signed" },
+    run: "stats.ttest_rel(after, before)",
+    call: "scipy.stats.ttest_rel",
+    cross: { c: "stats.ttest_1samp(after - before, 0)", why: "A paired t-test is a one-sample test on the differences. The result is identical." },
+    xcall: "scipy.stats.ttest_1samp on differences",
+    report: "Mean difference with 95% CI; d_z = mean(diff) / SD(diff)."
+  },
+  rm_anova: {
+    name: "Repeated-measures ANOVA", family: "Parametric", status: "helper",
+    when: "Three or more measurements per subject on one within-subject factor, with every subject complete.",
+    checks: [
+      { k: "sphericity", t: "Sphericity. Mauchly's test is in pingouin, not statsmodels", c: "pingouin.sphericity(df, dv='y', within='time', subject='id')" },
+      { k: "balance", t: "Every subject has every level" },
+      { k: "residual_normality", t: "Residuals roughly normal" }
+    ],
+    fb: { t: "Friedman test for non-normal data. A linear mixed model if any visits are missing.", to: "friedman" },
+    run: "from statsmodels.stats.anova import AnovaRM\nAnovaRM(df, depvar='y', subject='id', within=['time']).fit()",
+    call: "statsmodels AnovaRM",
+    cross: { c: "import pingouin as pg\npg.rm_anova(df, dv='y', within='time', subject='id', correction=True)", why: "The uncorrected F should match AnovaRM. pingouin adds the Greenhouse–Geisser correction that statsmodels lacks." },
+    xcall: "pingouin.rm_anova",
+    report: "Partial or generalized η²; Greenhouse–Geisser p if sphericity fails.",
+    watch: "AnovaRM fails on missing cells. Missing visits are common in clinical data, which usually means a mixed model instead."
+  },
+  lmm: {
+    name: "Linear mixed model", family: "Mixed and multivariate", status: "judgment",
+    when: "Repeated or clustered continuous outcomes with missing visits, uneven timing, between-subject factors, or nesting such as patients within sites.",
+    checks: [
+      { k: "random_effects", t: "Random intercepts and slopes chosen from the design" },
+      { k: "convergence", t: "Model converged without boundary warnings", c: "m.converged" },
+      { k: "residual_normality", t: "Residuals roughly normal" },
+      { k: "cluster_count", t: "Enough clusters to estimate the variance components" }
+    ],
+    fb: { t: "A population-averaged GEE if the random-effects structure won't converge.", to: "gee_cont" },
+    run: "m = smf.mixedlm('y ~ time * group', df, groups=df['id'],\n                re_formula='~time').fit(reml=True)",
+    call: "statsmodels mixedlm",
+    cross: { c: "g = smf.gee('y ~ time * group', 'id', df,\n            cov_struct=sm.cov_struct.Exchangeable()).fit()", why: "With an identity link, mixed-model fixed effects and GEE estimates target similar quantities. Large disagreement is a warning about the model, not rounding." },
+    xcall: "statsmodels gee (exchangeable)",
+    report: "Fixed effects with 95% CI; variance components; ICC.",
+    watch: "Random-effects structure, REML versus ML for model comparison, and how time is coded are modeling decisions. This is the core of the tail that needs a person."
+  },
+  gee_cont: {
+    name: "GEE for a continuous outcome", family: "Mixed and multivariate", status: "judgment",
+    when: "Clustered or longitudinal continuous data where you want population-averaged effects rather than subject-specific ones.",
+    checks: [
+      { k: "cluster_count", t: "Enough clusters. Robust standard errors get unreliable below about 40" },
+      { k: "working_correlation", t: "Working correlation chosen: exchangeable, AR(1), or independence" },
+      { k: "missingness", t: "Missing data plausibly completely at random" }
+    ],
+    fb: { t: "Linear mixed model.", to: "lmm" },
+    run: "smf.gee('y ~ time * group', 'id', df,\n        family=sm.families.Gaussian(),\n        cov_struct=sm.cov_struct.Exchangeable()).fit()",
+    call: "statsmodels gee",
+    cross: { c: "smf.gee('y ~ time * group', 'id', df,\n        family=sm.families.Gaussian(),\n        cov_struct=sm.cov_struct.Independence()).fit()", why: "Robust standard errors should be similar across working correlations. Big swings mean the estimate is fragile." },
+    xcall: "statsmodels gee (independence)",
+    report: "Coefficients with robust 95% CI; QIC to compare working correlations.",
+    watch: "GEE assumes data are missing completely at random; mixed models tolerate missing at random. With dropout, that difference matters."
+  },
+  wilcoxon_signed: {
+    name: "Wilcoxon signed-rank test (paired)", family: "Nonparametric", status: "ready",
+    when: "Paired or matched measurements when the differences aren't normal, or the outcome is ordinal.",
+    checks: [
+      { k: "symmetry", t: "Differences roughly symmetric around their median" },
+      { k: "zero_handling", t: "Decide how zero differences are handled", c: "zero_method='wilcox' or 'pratt'" }
+    ],
+    fb: { t: "Sign test, if the differences are clearly skewed.", k: "sign_test", c: "d = after - before\nstats.binomtest(int((d > 0).sum()), int((d != 0).sum()))" },
+    run: "stats.wilcoxon(after, before, zero_method='wilcox')",
+    call: "scipy.stats.wilcoxon",
+    cross: { c: "d = after - before\nstats.binomtest(int((d > 0).sum()), int((d != 0).sum()))", why: "The sign test has less power but should point the same way. If it doesn't, look at the distribution of differences." },
+    xcall: "scipy.stats.binomtest (sign test)",
+    report: "Hodges–Lehmann median difference; matched-pairs rank-biserial correlation."
+  },
+  friedman: {
+    name: "Friedman test", family: "Nonparametric", status: "ready",
+    when: "Three or more repeated conditions per subject with an ordinal or non-normal outcome and complete data.",
+    checks: [
+      { k: "complete_blocks", t: "Every subject measured under every condition" }
+    ],
+    fb: { t: "Ordinal GEE if the data are incomplete.", to: "ordinal_gee" },
+    run: "stats.friedmanchisquare(t1, t2, t3)",
+    call: "scipy.stats.friedmanchisquare",
+    cross: { c: "import pingouin as pg\npg.friedman(df, dv='y', within='time', subject='id')", why: "Same statistic. pingouin also reports Kendall's W." },
+    xcall: "pingouin.friedman",
+    report: "Kendall's W.",
+    post: "Pairwise Wilcoxon signed-rank tests with Holm correction: statsmodels.stats.multitest.multipletests(p, method='holm')."
+  },
+  ordinal_gee: {
+    name: "Ordinal GEE", family: "Mixed and multivariate", status: "judgment",
+    when: "An ordinal outcome measured repeatedly or within clusters, with covariates.",
+    checks: [
+      { k: "proportional_odds", t: "Proportional odds plausible, as for ordinal logistic regression" },
+      { k: "cluster_count", t: "Enough clusters for robust standard errors" },
+      { k: "sparse_levels", t: "Every outcome level reasonably populated" }
+    ],
+    fb: { t: "Collapse to binary and use logistic GEE, accepting the information loss.", to: "gee_logit" },
+    run: "smf.ordinal_gee('y ~ time + group', 'id', df,\n                cov_struct=sm.cov_struct.GlobalOddsRatio('ordinal')).fit()",
+    call: "statsmodels ordinal_gee",
+    cross: { c: "# ignore clustering to see the naive estimate\nfrom statsmodels.miscmodels.ordinal_model import OrderedModel\nOrderedModel.from_formula('y ~ 0 + time + group', df,\n                          distr='logit').fit(method='bfgs')", why: "Point estimates should agree in direction. The naive standard errors will be too small." },
+    xcall: "statsmodels OrderedModel (naive)",
+    report: "Cumulative odds ratios with robust 95% CI."
+  },
+  one_sample_wilcoxon: {
+    name: "Wilcoxon signed-rank (one sample)", family: "Nonparametric", status: "ready",
+    when: "Compare the center of one ordinal or non-normal measure with a reference value.",
+    checks: [
+      { k: "symmetry", t: "Distribution roughly symmetric around its median" }
+    ],
+    fb: { t: "Sign test if the distribution is skewed.", k: "sign_test", c: "stats.binomtest(int((x > m0).sum()), int((x != m0).sum()))" },
+    run: "stats.wilcoxon(x - m0)",
+    call: "scipy.stats.wilcoxon",
+    cross: { c: "stats.binomtest(int((x > m0).sum()), int((x != m0).sum()))", why: "The sign test should agree in direction. Disagreement points to asymmetry." },
+    xcall: "scipy.stats.binomtest (sign test)",
+    report: "Median with CI; rank-biserial correlation."
+  },
+  mann_whitney: {
+    name: "Mann–Whitney U test", family: "Nonparametric", status: "ready",
+    when: "Two independent groups with an ordinal outcome, or a continuous outcome that isn't normal.",
+    checks: [
+      { k: "shape_similarity", t: "Similar distribution shapes if you want to talk about medians. Otherwise it tests stochastic dominance" }
+    ],
+    fb: { t: "Brunner–Munzel test when the group spreads differ a lot.", k: "brunner_munzel", c: "stats.brunnermunzel(g1, g2)" },
+    run: "stats.mannwhitneyu(g1, g2, alternative='two-sided')",
+    call: "scipy.stats.mannwhitneyu",
+    cross: { c: "stats.ranksums(g1, g2)", why: "The rank-sum test is the same test with a normal approximation. p-values should be close in moderate samples." },
+    xcall: "scipy.stats.ranksums",
+    report: "Rank-biserial correlation, or the common-language effect size U / (n₁n₂).",
+    watch: "U / (n₁n₂) is exactly the AUC. The same machinery powers the ROC leaf."
+  },
+  kruskal: {
+    name: "Kruskal–Wallis test", family: "Nonparametric", status: "ready",
+    when: "Three or more independent groups with an ordinal or non-normal continuous outcome.",
+    checks: [
+      { k: "shape_similarity", t: "Similar distribution shapes if you want to talk about medians" }
+    ],
+    run: "stats.kruskal(*groups)",
+    call: "scipy.stats.kruskal",
+    cross: { c: "# one-way ANOVA on ranks\nr = stats.rankdata(df['y'])\nstats.f_oneway(*[r[df['group'] == k] for k in df['group'].unique()])", why: "ANOVA on ranks approximates Kruskal–Wallis. It should agree on direction and roughly on p." },
+    xcall: "scipy.stats.f_oneway on ranks",
+    report: "ε² = H / (n − 1).",
+    post: "Dunn's test with scikit_posthocs.posthoc_dunn(df, val_col='y', group_col='group', p_adjust='holm')."
+  },
+  spearman: {
+    name: "Spearman rank correlation", family: "Nonparametric", status: "ready",
+    when: "Monotonic association between two ordinal or non-normal continuous variables.",
+    checks: [
+      { k: "monotonic", t: "Monotonic, not U-shaped. Plot it first" }
+    ],
+    fb: { t: "Kendall's τ for small samples or many ties.", k: "kendall_tau", c: "stats.kendalltau(x, y)" },
+    run: "stats.spearmanr(x, y)",
+    call: "scipy.stats.spearmanr",
+    cross: { c: "stats.pearsonr(stats.rankdata(x), stats.rankdata(y))", why: "Spearman's ρ is Pearson's r on ranks. The coefficients must match exactly." },
+    xcall: "scipy.stats.pearsonr on ranks",
+    report: "ρ with 95% CI (bootstrap or Fisher z)."
+  },
+  ordinal_logit: {
+    name: "Ordinal logistic regression", family: "Regression model", status: "helper",
+    when: "An ordinal outcome with several predictors and independent observations.",
+    checks: [
+      { k: "proportional_odds", t: "Proportional odds. There's no built-in Brant test, so compare binary fits across cut-points" },
+      { k: "sparse_levels", t: "Every outcome level has enough observations" }
+    ],
+    fb: { t: "Multinomial logistic regression if proportional odds clearly fails.", to: "mnlogit" },
+    run: "from statsmodels.miscmodels.ordinal_model import OrderedModel\nm = OrderedModel.from_formula('y ~ 0 + x1 + x2', df, distr='logit')\nres = m.fit(method='bfgs')",
+    call: "statsmodels OrderedModel",
+    cross: { c: "# rough proportional-odds check\nfor cut in cut_points:\n    d = df.assign(b=(df['y'] > cut).astype(int))\n    print(cut, smf.logit('b ~ x1 + x2', d).fit(disp=0).params)", why: "Slopes should be roughly constant across cut-points. If they drift, proportional odds is doubtful." },
+    xcall: "binary logits per cut-point",
+    report: "Cumulative odds ratios with 95% CI."
+  },
+  mcnemar: {
+    name: "McNemar's test", family: "Categorical", status: "ready",
+    when: "A binary outcome measured twice on the same subjects, or in matched pairs.",
+    checks: [
+      { k: "paired_table", t: "A 2×2 table of paired outcomes, not two sets of marginal counts" },
+      { k: "discordant_count", t: "Use the exact version when discordant pairs are few (under 25)" }
+    ],
+    run: "from statsmodels.stats.contingency_tables import mcnemar\nmcnemar(table, exact=True)",
+    call: "statsmodels mcnemar",
+    cross: { c: "b, c = table[0][1], table[1][0]\nstats.binomtest(b, b + c, 0.5)", why: "Exact McNemar is a binomial test on the discordant pairs. The p-value is identical." },
+    xcall: "scipy.stats.binomtest on discordant pairs",
+    report: "Paired odds ratio b / c with CI; difference in proportions."
+  },
+  cochran_q: {
+    name: "Cochran's Q test", family: "Categorical", status: "ready",
+    when: "A binary outcome under three or more conditions on the same subjects, with complete data.",
+    checks: [
+      { k: "complete_blocks", t: "Every subject observed under every condition" }
+    ],
+    fb: { t: "Logistic GEE for incomplete or clustered data.", to: "gee_logit" },
+    run: "from statsmodels.stats.contingency_tables import cochrans_q\ncochrans_q(x)  # x: subjects × conditions, 0/1",
+    call: "statsmodels cochrans_q",
+    cross: { c: "import pingouin as pg\npg.cochran(df, dv='y', within='cond', subject='id')", why: "Second implementation. Q and p should match." },
+    xcall: "pingouin.cochran",
+    report: "Proportion per condition with CIs.",
+    post: "Pairwise McNemar tests with Holm correction."
+  },
+  gee_logit: {
+    name: "Logistic GEE", family: "Mixed and multivariate", status: "judgment",
+    when: "A binary outcome measured repeatedly or within clusters, such as patients within clinics, with covariates.",
+    checks: [
+      { k: "cluster_count", t: "Enough clusters for robust standard errors" },
+      { k: "working_correlation", t: "Working correlation chosen" },
+      { k: "estimand", t: "Population-averaged rather than subject-specific effects are what you want" }
+    ],
+    fb: { t: "A mixed-effects logistic model for subject-specific effects. statsmodels only has a Bayesian version (BinomialBayesMixedGLM).", k: "mixed_logistic" },
+    run: "smf.gee('y ~ time + group', 'id', df,\n        family=sm.families.Binomial(),\n        cov_struct=sm.cov_struct.Exchangeable()).fit()",
+    call: "statsmodels gee (binomial)",
+    cross: { c: "smf.gee('y ~ time + group', 'id', df,\n        family=sm.families.Binomial(),\n        cov_struct=sm.cov_struct.Independence()).fit()", why: "Robust standard errors should be stable across working correlations." },
+    xcall: "statsmodels gee (independence)",
+    report: "Odds ratios with robust 95% CI."
+  },
+  binom_test: {
+    name: "Exact binomial test", family: "Categorical", status: "ready",
+    when: "Compare one observed proportion with a reference proportion.",
+    checks: [
+      { k: "independence", t: "Independent trials, one per subject" }
+    ],
+    run: "res = stats.binomtest(k, n, p=p0)\nres.proportion_ci(method='wilson')",
+    call: "scipy.stats.binomtest",
+    cross: { c: "from statsmodels.stats.proportion import binom_test\nbinom_test(k, n, prop=p0)", why: "Same exact test in a second library." },
+    xcall: "statsmodels binom_test",
+    report: "Proportion with Wilson 95% CI."
+  },
+  two_by_two: {
+    name: "Chi-square or Fisher's exact (2×2)", family: "Categorical", status: "ready",
+    when: "A binary outcome compared between two independent groups.",
+    checks: [
+      { k: "expected_counts", t: "Use Fisher's exact test if any expected count is below 5", c: "stats.chi2_contingency(t).expected_freq" }
+    ],
+    run: "stats.chi2_contingency(t, correction=False)\n\n# small expected counts\nstats.fisher_exact(t)",
+    call: "scipy.stats.chi2_contingency / fisher_exact",
+    cross: { c: "from statsmodels.stats.contingency_tables import Table2x2\ntb = Table2x2(t)\ntb.test_nominal_association()\ntb.oddsratio_confint()", why: "The Pearson chi-square should match scipy's uncorrected statistic exactly." },
+    xcall: "statsmodels Table2x2",
+    report: "Risk difference, risk ratio, or odds ratio with 95% CI. Use the one the design supports: no risk ratios from case–control samples.",
+    watch: "scipy applies Yates' continuity correction to 2×2 tables by default. Decide once and set it explicitly."
+  },
+  chi_sq_indep: {
+    name: "Chi-square test of independence", family: "Categorical", status: "ready",
+    when: "Two categorical variables with independent observations, such as group by outcome category.",
+    checks: [
+      { k: "expected_counts", t: "Expected counts of 5 or more in about 80% of cells", c: "stats.chi2_contingency(t).expected_freq" }
+    ],
+    fb: { t: "A permutation test of the chi-square statistic when cells are sparse. scipy has no Fisher–Freeman–Halton test.", k: "permutation_chi_square" },
+    run: "t = pd.crosstab(df['a'], df['b'])\nstats.chi2_contingency(t)",
+    call: "scipy.stats.chi2_contingency",
+    cross: { c: "from statsmodels.stats.contingency_tables import Table\nTable(t).test_nominal_association()", why: "Second implementation. The statistic and p-value should match." },
+    xcall: "statsmodels Table.test_nominal_association",
+    report: "Cramér's V: stats.contingency.association(t, method='cramer').",
+    post: "Adjusted standardized residuals per cell: Table(t).standardized_resids."
+  },
+  logistic: {
+    name: "Logistic regression", family: "Regression model", status: "ready",
+    when: "A binary outcome with a continuous predictor or several predictors, independent observations.",
+    checks: [
+      { k: "events_per_variable", t: "Roughly 10 or more events per parameter" },
+      { k: "separation", t: "No perfect separation. Huge coefficients and SEs are the symptom" },
+      { k: "logit_linearity", t: "Continuous predictors linear in the logit: try splines" },
+      { k: "multicollinearity", t: "Predictors not too collinear", c: "variance_inflation_factor" }
+    ],
+    fb: { t: "Firth's penalized logistic regression for separation or rare events (firthlogist package).", k: "firth_logistic" },
+    run: "m = smf.logit('y ~ age + C(group) + x', df).fit()",
+    call: "statsmodels logit",
+    cross: { c: "smf.glm('y ~ age + C(group) + x', df,\n        family=sm.families.Binomial()).fit()", why: "Logit and binomial GLM are the same model fitted two ways. Coefficients should match to many decimals." },
+    xcall: "statsmodels glm (binomial)",
+    report: "Odds ratios with 95% CI: np.exp(m.conf_int()).",
+    watch: "If the goal is prediction rather than testing an effect, this belongs in a modeling workflow with penalized fits and cross-validated AUC, not a hypothesis test."
+  },
+  stuart_maxwell: {
+    name: "Stuart–Maxwell test", family: "Categorical", status: "ready",
+    when: "A categorical outcome with three or more levels measured twice on the same subjects (marginal homogeneity).",
+    checks: [
+      { k: "square_table", t: "Square table with the same categories at both times" }
+    ],
+    run: "from statsmodels.stats.contingency_tables import SquareTable\nSquareTable(t).homogeneity(method='stuart_maxwell')",
+    call: "statsmodels SquareTable.homogeneity",
+    cross: { c: "SquareTable(t).homogeneity(method='bhapkar')", why: "Bhapkar's test targets the same hypothesis and is asymptotically equivalent." },
+    xcall: "SquareTable.homogeneity(method='bhapkar')",
+    report: "Marginal proportions at each time."
+  },
+  nominal_gee: {
+    name: "Nominal GEE", family: "Mixed and multivariate", status: "judgment",
+    when: "An unordered categorical outcome measured repeatedly or within clusters.",
+    checks: [
+      { k: "cluster_count", t: "Enough clusters for robust standard errors" },
+      { k: "sparse_levels", t: "Every category reasonably populated" }
+    ],
+    run: "smf.nominal_gee('y ~ time + group', 'id', df).fit()",
+    call: "statsmodels nominal_gee",
+    cross: { c: "smf.mnlogit('y ~ time + group', df).fit()", why: "The naive multinomial fit ignores clustering. Directions should agree; its standard errors will be too small." },
+    xcall: "statsmodels mnlogit (naive)",
+    report: "Odds ratios against the reference category, with robust CIs."
+  },
+  chi_gof: {
+    name: "Chi-square goodness-of-fit", family: "Categorical", status: "ready",
+    when: "One categorical variable compared with an expected distribution.",
+    checks: [
+      { k: "expected_counts", t: "Expected counts of 5 or more per category" }
+    ],
+    fb: { t: "An exact multinomial test when counts are small.", k: "exact_multinomial" },
+    run: "stats.chisquare(f_obs=observed, f_exp=expected)",
+    call: "scipy.stats.chisquare",
+    cross: { c: "stats.power_divergence(observed, expected, lambda_='log-likelihood')", why: "The G-test answers the same question. Results should be close in large samples." },
+    xcall: "scipy.stats.power_divergence (G-test)",
+    report: "Cohen's w."
+  },
+  mnlogit: {
+    name: "Multinomial logistic regression", family: "Regression model", status: "ready",
+    when: "An unordered categorical outcome with three or more levels and predictors.",
+    checks: [
+      { k: "iia", t: "Independence of irrelevant alternatives: drop one category and see whether the others shift" },
+      { k: "events_per_category", t: "Enough observations in every category" }
+    ],
+    run: "smf.mnlogit('y ~ age + C(group)', df).fit()",
+    call: "statsmodels mnlogit",
+    cross: { c: "from sklearn.linear_model import LogisticRegression\nLogisticRegression(penalty=None, max_iter=1000).fit(X, y)", why: "The unpenalized fit has the same likelihood but a different parameterization. Compare predicted probabilities, not coefficients." },
+    xcall: "sklearn LogisticRegression(penalty=None)",
+    report: "Relative risk ratios (exponentiated coefficients) against the reference category."
+  },
+  gee_poisson: {
+    name: "Poisson GEE", family: "Mixed and multivariate", status: "judgment",
+    when: "A count outcome measured repeatedly or within clusters, such as monthly ED visits per patient.",
+    checks: [
+      { k: "exposure_offset", t: "Exposure time included as an offset" },
+      { k: "cluster_count", t: "Enough clusters for robust standard errors" },
+      { k: "working_correlation", t: "Working correlation chosen" }
+    ],
+    run: "smf.gee('visits ~ time + group', 'id', df,\n        family=sm.families.Poisson(),\n        cov_struct=sm.cov_struct.Exchangeable(),\n        offset=np.log(df['months'])).fit()",
+    call: "statsmodels gee (poisson)",
+    cross: { c: "smf.gee('visits ~ time + group', 'id', df,\n        family=sm.families.Poisson(),\n        cov_struct=sm.cov_struct.Independence(),\n        offset=np.log(df['months'])).fit()", why: "Robust standard errors should be stable across working correlations." },
+    xcall: "statsmodels gee (independence)",
+    report: "Rate ratios with robust 95% CI."
+  },
+  poisson_2indep: {
+    name: "Two-sample rate comparison", family: "Count", status: "ready",
+    when: "Compare event rates between two groups, accounting for different follow-up time.",
+    checks: [
+      { k: "event_independence", t: "Events within a person roughly independent. Otherwise expect overdispersion" }
+    ],
+    fb: { t: "Negative binomial regression if the counts are overdispersed.", to: "poisson_reg" },
+    run: "from statsmodels.stats.rates import test_poisson_2indep\ntest_poisson_2indep(count1, exposure1, count2, exposure2, method='score')",
+    call: "statsmodels test_poisson_2indep",
+    cross: { c: "test_poisson_2indep(count1, exposure1, count2, exposure2,\n                    method='exact-cond')", why: "The conditional exact test should agree closely unless counts are small." },
+    xcall: "test_poisson_2indep(method='exact-cond')",
+    report: "Rate ratio with 95% CI."
+  },
+  poisson_reg: {
+    name: "Poisson or negative binomial regression", family: "Count", status: "ready",
+    when: "A count outcome with predictors, optionally with an exposure offset.",
+    checks: [
+      { k: "overdispersion", t: "Dispersion near 1. Well above 1 means negative binomial", c: "m.pearson_chi2 / m.df_resid" },
+      { k: "excess_zeros", t: "Observed zeros close to the number the model predicts" }
+    ],
+    fb: { t: "A zero-inflated model if there are far more zeros than predicted.", to: "zip" },
+    run: "m = smf.glm('y ~ age + C(group)', df, family=sm.families.Poisson(),\n            offset=np.log(df['exposure'])).fit()\n\n# overdispersed\nnb = smf.negativebinomial('y ~ age + C(group)', df,\n                          exposure=df['exposure']).fit()",
+    call: "statsmodels glm (poisson) / negativebinomial",
+    cross: { c: "# quasi-Poisson: same estimates, SEs scaled by dispersion\nsmf.glm('y ~ age + C(group)', df, family=sm.families.Poisson(),\n        offset=np.log(df['exposure'])).fit(scale='X2')", why: "If negative binomial and quasi-Poisson disagree sharply on inference, look at the mean–variance relationship." },
+    xcall: "statsmodels glm (quasi-Poisson)",
+    report: "Rate ratios with 95% CI."
+  },
+  zip: {
+    name: "Zero-inflated count model", family: "Count", status: "judgment",
+    when: "Counts with more zeros than Poisson or negative binomial predicts, and a plausible reason for structural zeros, such as never-users.",
+    checks: [
+      { k: "zero_process", t: "A real zero-generating process exists. That's a design question, not a statistical one" },
+      { k: "beats_nb", t: "Clearly better than plain negative binomial" }
+    ],
+    fb: { t: "A hurdle model (statsmodels HurdleCountModel) if zeros and positive counts come from separate processes.", k: "hurdle_model" },
+    run: "from statsmodels.discrete.count_model import ZeroInflatedNegativeBinomialP\nZeroInflatedNegativeBinomialP(y, X, exog_infl=X_infl,\n                              inflation='logit').fit()",
+    call: "statsmodels ZeroInflatedNegativeBinomialP",
+    cross: { c: "sm.NegativeBinomial(y, X).fit().aic", why: "If the zero-inflated model doesn't clearly beat plain negative binomial, the extra zeros may just be overdispersion." },
+    xcall: "statsmodels NegativeBinomial (AIC)",
+    report: "Rate ratios for the count part; odds ratios for the zero part."
+  },
+  km_logrank: {
+    name: "Kaplan–Meier with log-rank test", family: "Survival", status: "ready",
+    when: "Compare time to event between groups, without adjustment, with censoring.",
+    checks: [
+      { k: "noninformative_censoring", t: "Censoring unrelated to the outcome. That's a design question" },
+      { k: "crossing_curves", t: "Curves don't cross. Crossing curves sap the log-rank test's power" }
+    ],
+    fb: { t: "Restricted mean survival time when curves cross (lifelines restricted_mean_survival_time).", k: "rmst" },
+    run: "from statsmodels.duration.survfunc import SurvfuncRight, survdiff\nsf = SurvfuncRight(df['time'], df['event'])\nchisq, p = survdiff(df['time'], df['event'], df['group'])",
+    call: "statsmodels survdiff",
+    cross: { c: "from lifelines.statistics import logrank_test\nlogrank_test(t_a, t_b, event_observed_A=e_a, event_observed_B=e_b)", why: "Second implementation of the same test. The chi-square should match." },
+    xcall: "lifelines logrank_test",
+    report: "Median survival per group with CI; survival at fixed time points."
+  },
+  cox: {
+    name: "Cox proportional hazards", family: "Survival", status: "helper",
+    when: "Time to event with covariates, to estimate hazard ratios.",
+    checks: [
+      { k: "proportional_hazards", t: "Proportional hazards. Plot Schoenfeld residuals against time; statsmodels has no formal test", c: "res.schoenfeld_residuals" },
+      { k: "events_per_variable", t: "Roughly 10 or more events per parameter" },
+      { k: "covariate_linearity", t: "Continuous covariates entered in a sensible functional form" }
+    ],
+    fb: { t: "Stratify on the variable that breaks proportional hazards, or model a time-varying effect.", to: "cox_cluster" },
+    run: "res = smf.phreg('time ~ age + C(group)', df, status=df['event'],\n                ties='efron').fit()",
+    call: "statsmodels phreg",
+    cross: { c: "from lifelines import CoxPHFitter\ncph = CoxPHFitter().fit(d, duration_col='time', event_col='event')\ncph.check_assumptions(d)", why: "lifelines uses Efron ties by default; statsmodels uses Breslow. Set ties='efron' or the two won't match." },
+    xcall: "lifelines CoxPHFitter",
+    report: "Hazard ratios with 95% CI."
+  },
+  competing: {
+    name: "Competing risks analysis", family: "Survival", status: "judgment",
+    when: "More than one event type can end follow-up, such as death before readmission.",
+    checks: [
+      { k: "estimand", t: "Estimand chosen: cause-specific hazards for etiology, cumulative incidence for prognosis" }
+    ],
+    fb: { t: "Fine–Gray subdistribution hazards. Not available in statsmodels or lifelines.", k: "fine_gray" },
+    run: "# cumulative incidence\nfrom lifelines import AalenJohansenFitter\najf = AalenJohansenFitter().fit(df['time'], df['event_type'],\n                                event_of_interest=1)\n\n# cause-specific hazard: competing events treated as censored\nsmf.phreg('time ~ age + C(group)', df,\n          status=(df['event_type'] == 1).astype(int)).fit()",
+    call: "lifelines AalenJohansenFitter + statsmodels phreg",
+    cross: { c: "from statsmodels.duration.survfunc import SurvfuncRight\nnaive = SurvfuncRight(df['time'], (df['event_type'] == 1).astype(int))", why: "One minus naive Kaplan–Meier overstates cumulative incidence. The size of the gap shows how much competing risks matter here." },
+    xcall: "naive Kaplan–Meier comparison",
+    report: "Cumulative incidence curves; cause-specific hazard ratios."
+  },
+  cox_cluster: {
+    name: "Clustered or stratified Cox model", family: "Survival", status: "judgment",
+    when: "Time to event with subjects nested in sites or families, or a covariate that breaks proportional hazards.",
+    checks: [
+      { k: "cluster_count", t: "Enough clusters for robust standard errors" },
+      { k: "frailty_vs_robust", t: "Robust SEs and frailty models answer different questions. Choose deliberately" }
+    ],
+    run: "# cluster-robust standard errors\nsmf.phreg('time ~ age + C(group)', df, status=df['event']).fit(groups=df['site'])\n\n# stratify on a non-proportional covariate\nsmf.phreg('time ~ age + C(group)', df, status=df['event'],\n          strata=df['stage']).fit()",
+    call: "statsmodels phreg (groups / strata)",
+    cross: { c: "CoxPHFitter().fit(d, duration_col='time', event_col='event',\n                  cluster_col='site')", why: "lifelines' cluster-robust standard errors should be close to statsmodels'." },
+    xcall: "lifelines CoxPHFitter(cluster_col)",
+    report: "Hazard ratios with cluster-robust 95% CI."
+  },
+  manova: {
+    name: "MANOVA", family: "Mixed and multivariate", status: "helper",
+    when: "Compare groups on several continuous outcomes at once, such as a panel of related lab values.",
+    checks: [
+      { k: "multivariate_normality", t: "Residuals roughly multivariate normal" },
+      { k: "covariance_homogeneity", t: "Similar covariance matrices across groups. Box's M is in pingouin", c: "pingouin.box_m(df, dvs=['y1', 'y2', 'y3'], group='group')" },
+      { k: "outcome_redundancy", t: "Outcomes correlated, but not redundant" }
+    ],
+    fb: { t: "Rely on Pillai's trace, the most robust of the four statistics.", k: "pillai_trace" },
+    run: "from statsmodels.multivariate.manova import MANOVA\nMANOVA.from_formula('y1 + y2 + y3 ~ group', df).mv_test()",
+    call: "statsmodels MANOVA",
+    cross: { c: "res = MANOVA.from_formula('y1 + y2 + y3 ~ group', df).mv_test()\nres.results['group']['stat']", why: "All four statistics usually agree. If Pillai's trace and Wilks' λ disagree, assumptions are likely violated; trust Pillai." },
+    xcall: "Pillai vs Wilks in mv_test",
+    report: "Pillai's trace; partial η²; follow-up univariate ANOVAs with correction."
+  },
+  mancova: {
+    name: "MANCOVA", family: "Mixed and multivariate", status: "helper",
+    when: "Several continuous outcomes compared between groups, adjusted for covariates.",
+    checks: [
+      { k: "multivariate_normality", t: "Residuals roughly multivariate normal" },
+      { k: "covariance_homogeneity", t: "Similar covariance matrices across groups", c: "pingouin.box_m(df, dvs=['y1', 'y2'], group='group')" },
+      { k: "homogeneous_slopes", t: "No group × covariate interaction" }
+    ],
+    run: "from statsmodels.multivariate.manova import MANOVA\nMANOVA.from_formula('y1 + y2 ~ C(group) + age + baseline', df).mv_test()",
+    call: "statsmodels MANOVA (with covariates)",
+    cross: { c: "# per-outcome ANCOVA should point the same way\nfor y in ['y1', 'y2']:\n    print(smf.ols(f'{y} ~ C(group) + age + baseline', df).fit().params)", why: "Univariate ANCOVAs don't replace the joint test, but a joint effect with no univariate signal at all deserves a closer look." },
+    xcall: "per-outcome ols",
+    report: "Pillai's trace; adjusted group differences per outcome."
+  },
+  mv_reg: {
+    name: "Multivariate multiple regression", family: "Mixed and multivariate", status: "helper",
+    when: "Predict several continuous outcomes from the same set of continuous predictors.",
+    checks: [
+      { k: "multivariate_normality", t: "Residuals roughly multivariate normal" },
+      { k: "multicollinearity", t: "Predictors not too collinear" }
+    ],
+    run: "MANOVA.from_formula('y1 + y2 ~ x1 + x2', df).mv_test()  # joint tests\nfits = {y: smf.ols(f'{y} ~ x1 + x2', df).fit() for y in ['y1', 'y2']}",
+    call: "statsmodels MANOVA + ols",
+    cross: { c: "B = np.linalg.lstsq(X, Y, rcond=None)[0]", why: "Coefficients are identical to the separate OLS fits. Only the joint tests differ." },
+    xcall: "numpy.linalg.lstsq on the outcome matrix",
+    report: "Coefficients per outcome with CIs; a multivariate test per predictor."
+  },
+  factor_sem: {
+    name: "Factor analysis or SEM", family: "Mixed and multivariate", status: "judgment",
+    when: "The outcomes are items of a scale or indicators of an underlying construct, such as questionnaire domains.",
+    checks: [
+      { k: "approach", t: "Exploratory or confirmatory. That's a design decision" },
+      { k: "sample_size", t: "Enough subjects per item" },
+      { k: "factorability", t: "Items correlated enough to factor (KMO, Bartlett)" }
+    ],
+    run: "from statsmodels.multivariate.factor import Factor\nres = Factor(items, n_factor=3, method='ml').fit()\nres.rotate('varimax')",
+    call: "statsmodels Factor",
+    cross: { c: "import semopy\nm = semopy.Model(desc)\nm.fit(df)\nsemopy.calc_stats(m)", why: "Exploratory loadings should resemble the structure you'd specify confirmatorily. Fit indices tell you whether it holds." },
+    xcall: "semopy confirmatory model",
+    report: "Loadings; fit indices (CFI, RMSEA, SRMR).",
+    watch: "This is model building, not test selection. Flag it and hand it to a person."
+  },
+  pearson: {
+    name: "Pearson correlation", family: "Parametric", status: "ready",
+    when: "Linear association between two continuous variables.",
+    checks: [
+      { k: "linearity", t: "Linear relationship. Plot it first" },
+      { k: "outliers", t: "No single point driving the coefficient" },
+      { k: "bivariate_normality", t: "Roughly bivariate normal, for the p-value and CI" }
+    ],
+    fb: { t: "Spearman rank correlation.", to: "spearman" },
+    run: "res = stats.pearsonr(x, y)\nres.confidence_interval()",
+    call: "scipy.stats.pearsonr",
+    cross: { c: "np.corrcoef(x, y)[0, 1]", why: "The coefficient must match exactly." },
+    xcall: "numpy.corrcoef",
+    report: "r with 95% CI."
+  },
+  point_biserial: {
+    name: "Point-biserial correlation", family: "Parametric", status: "ready",
+    when: "Association between a binary variable and a continuous one.",
+    checks: [
+      { k: "normality_by_group", t: "The continuous variable roughly normal within each group" },
+      { k: "equal_variance", t: "Similar variances in the two groups" }
+    ],
+    fb: { t: "Mann–Whitney U.", to: "mann_whitney" },
+    run: "stats.pointbiserialr(binary, x)",
+    call: "scipy.stats.pointbiserialr",
+    cross: { c: "stats.ttest_ind(x[binary == 1], x[binary == 0], equal_var=True)", why: "Mathematically identical to Student's t-test. Same p-value." },
+    xcall: "scipy.stats.ttest_ind(equal_var=True)",
+    report: "r_pb with 95% CI."
+  },
+  partial_corr: {
+    name: "Partial correlation", family: "Parametric", status: "helper",
+    when: "Association between two continuous variables after removing the effect of one or more others.",
+    checks: [
+      { k: "linearity", t: "Linear relationships with the covariates" },
+      { k: "residual_normality", t: "Residuals roughly normal" }
+    ],
+    run: "import pingouin as pg\npg.partial_corr(df, x='x', y='y', covar=['age', 'bmi'])",
+    call: "pingouin.partial_corr",
+    cross: { c: "rx = smf.ols('x ~ age + bmi', df).fit().resid\nry = smf.ols('y ~ age + bmi', df).fit().resid\nstats.pearsonr(rx, ry)", why: "Correlating residuals gives the same coefficient. Its p-value uses too many degrees of freedom, so trust pingouin's." },
+    xcall: "pearsonr on regression residuals",
+    report: "Partial r with 95% CI."
+  },
+  cohen_kappa: {
+    name: "Cohen's kappa", family: "Agreement and accuracy", status: "ready",
+    when: "Two raters assign categories to the same items. Use weighted kappa for ordinal ratings.",
+    checks: [
+      { k: "same_categories", t: "Both raters use the same set of categories" },
+      { k: "prevalence", t: "Kappa drops when one category dominates. Report raw agreement too" }
+    ],
+    run: "from statsmodels.stats.inter_rater import cohens_kappa, to_table\ntable, _ = to_table(np.column_stack([r1, r2]))\ncohens_kappa(table, wt='quadratic')  # omit wt for nominal ratings",
+    call: "statsmodels cohens_kappa",
+    cross: { c: "from sklearn.metrics import cohen_kappa_score\ncohen_kappa_score(r1, r2, weights='quadratic')", why: "Point estimates should match. statsmodels adds the standard error and CI." },
+    xcall: "sklearn cohen_kappa_score",
+    report: "κ with 95% CI, plus percent agreement."
+  },
+  fleiss_kappa: {
+    name: "Fleiss' kappa", family: "Agreement and accuracy", status: "ready",
+    when: "Three or more raters assign categories to the same items.",
+    checks: [
+      { k: "complete_ratings", t: "Every item rated by the same number of raters. If not, use Krippendorff's α" }
+    ],
+    run: "from statsmodels.stats.inter_rater import fleiss_kappa, aggregate_raters\ncounts, _ = aggregate_raters(ratings)  # ratings: items × raters\nfleiss_kappa(counts)",
+    call: "statsmodels fleiss_kappa",
+    cross: { c: "import krippendorff\nkrippendorff.alpha(reliability_data=ratings.T,\n                   level_of_measurement='nominal')", why: "Krippendorff's α is close to Fleiss' κ for complete nominal data, and also handles missing ratings." },
+    xcall: "krippendorff.alpha",
+    report: "κ with bootstrap 95% CI."
+  },
+  bland_altman: {
+    name: "Bland–Altman analysis", family: "Agreement and accuracy", status: "helper",
+    when: "Two methods measure the same continuous quantity, such as a new device against a reference.",
+    checks: [
+      { k: "difference_normality", t: "Differences roughly normal" },
+      { k: "proportional_bias", t: "No proportional bias: regress differences on means", c: "sm.OLS(d, sm.add_constant((m1 + m2) / 2)).fit()" }
+    ],
+    fb: { t: "Log-transform, or report ratio limits, if differences grow with magnitude.", k: "log_limits" },
+    run: "d = m1 - m2\nbias, sd = d.mean(), d.std(ddof=1)\nloa = (bias - 1.96 * sd, bias + 1.96 * sd)",
+    call: "custom limits of agreement",
+    cross: { c: "sm.graphics.mean_diff_plot(m1, m2)", why: "The plot draws its own bias and limit lines. They should sit exactly where the hand-computed values say." },
+    xcall: "statsmodels mean_diff_plot",
+    report: "Bias and 95% limits of agreement, each with a CI.",
+    watch: "Correlation measures association, not agreement. Two methods can correlate at 0.99 and still disagree clinically."
+  },
+  icc: {
+    name: "Intraclass correlation (ICC)", family: "Agreement and accuracy", status: "judgment",
+    when: "Reliability of continuous ratings across raters, or across repeated measurements.",
+    checks: [
+      { k: "icc_form", t: "Form chosen: one-way or two-way, random or fixed raters, agreement or consistency, single or average" },
+      { k: "residual_normality", t: "Residuals roughly normal" }
+    ],
+    run: "import pingouin as pg\npg.intraclass_corr(data=df, targets='patient', raters='rater', ratings='score')",
+    call: "pingouin.intraclass_corr",
+    cross: { c: "# ICC(2,1) from two-way ANOVA mean squares\nm = smf.ols('score ~ C(patient) + C(rater)', df).fit()\nsm.stats.anova_lm(m)", why: "Plug the mean squares into the Shrout–Fleiss formula. It should reproduce pingouin's ICC2 row." },
+    xcall: "two-way ANOVA mean squares",
+    report: "ICC form named explicitly, such as ICC(2,1) absolute agreement, with 95% CI.",
+    watch: "Six ICC forms give different numbers on the same data. The design decides the form; the tool should ask, not guess."
+  },
+  diag_binary: {
+    name: "Sensitivity, specificity and predictive values", family: "Agreement and accuracy", status: "helper",
+    when: "A binary test result compared with a gold-standard diagnosis.",
+    checks: [
+      { k: "verification", t: "Gold standard applied to everyone, not only to test positives" },
+      { k: "prevalence", t: "PPV and NPV depend on prevalence. Skip them in case–control samples" }
+    ],
+    run: "from sklearn.metrics import confusion_matrix\nfrom statsmodels.stats.proportion import proportion_confint\ntn, fp, fn, tp = confusion_matrix(truth, test).ravel()\nsens, spec = tp / (tp + fn), tn / (tn + fp)\nproportion_confint(tp, tp + fn, method='wilson')",
+    call: "custom from confusion_matrix + proportion_confint",
+    cross: { c: "pd.crosstab(truth, test)", why: "An independent tally catches label-encoding mistakes about which class is positive, the most common bug here." },
+    xcall: "pandas crosstab",
+    report: "Sensitivity and specificity with Wilson CIs; LR+ and LR−."
+  },
+  roc_auc: {
+    name: "ROC curve and AUC", family: "Agreement and accuracy", status: "helper",
+    when: "A continuous score or predicted probability compared with a binary gold standard.",
+    checks: [
+      { k: "positive_class", t: "Positive class defined explicitly" },
+      { k: "ci_method", t: "No CI in sklearn. Use a stratified bootstrap or DeLong" }
+    ],
+    run: "from sklearn.metrics import roc_auc_score, roc_curve\nauc = roc_auc_score(y, score)\nfpr, tpr, thr = roc_curve(y, score)",
+    call: "sklearn roc_auc_score",
+    cross: { c: "u = stats.mannwhitneyu(score[y == 1], score[y == 0]).statistic\nu / ((y == 1).sum() * (y == 0).sum())", why: "AUC equals the Mann–Whitney U divided by n₁n₀. They must match exactly; if not, the positive class is flipped." },
+    xcall: "scipy.stats.mannwhitneyu / (n1 * n0)",
+    report: "AUC with 95% CI; sensitivity and specificity at a pre-specified threshold.",
+    watch: "A threshold chosen on the same data you report it on is optimistic. Fix it in advance or validate it."
+  },
+  delong: {
+    name: "DeLong test for paired AUCs", family: "Agreement and accuracy", status: "helper",
+    when: "Two scores evaluated on the same patients: is one AUC larger?",
+    checks: [
+      { k: "same_patients", t: "Same patients and the same outcome labels for both scores" },
+      { k: "not_nested", t: "Not a model compared with the same model plus one marker" }
+    ],
+    run: "# not in scipy, statsmodels or sklearn: write it once\n# (fast DeLong, Sun and Xu 2014) and unit-test it\nauc_a, auc_b, p = delong_paired(y, score_a, score_b)",
+    call: "custom delong_paired",
+    cross: { c: "rng = np.random.default_rng(0)\ndiffs = []\nfor _ in range(2000):\n    i = rng.integers(0, len(y), len(y))\n    diffs.append(roc_auc_score(y[i], a[i]) - roc_auc_score(y[i], b[i]))\nnp.percentile(diffs, [2.5, 97.5])", why: "A paired bootstrap of the AUC difference should give a similar CI. Use it to validate your DeLong implementation." },
+    xcall: "paired bootstrap of the AUC difference",
+    report: "AUC difference with 95% CI and p-value.",
+    watch: "Don't use it to test whether adding a marker to a nested model improves AUC; that comparison is known to be invalid. Test the marker's coefficient instead."
+  }
+};
+
+
+const STATUS = {
+  ready:    { label: "Ready",               desc: "One scipy or statsmodels call. Safe to automate." },
+  helper:   { label: "Needs a helper",      desc: "No single call. Needs a small function or another package." },
+  judgment: { label: "Needs your judgment", desc: "Modeling decisions the pipeline shouldn't make alone." }
+};
+const IMPORTS = "from scipy import stats; import numpy as np; import pandas as pd; import statsmodels.api as sm; import statsmodels.formula.api as smf";
+const STORE = "stf.v1";
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isLeaf = id => id.startsWith("L:");
+const leafId = id => id.slice(2);
+
+let choices = [];
+let fStatus = "all";
+let fText = "";
+
+function walk(ch) {
+  const seq = [];
+  let id = "root";
+  for (const c of ch) {
+    if (isLeaf(id)) return null;
+    const n = NODES[id];
+    if (!n || !n.opts[c]) return null;
+    seq.push({ id, c, n, o: n.opts[c] });
+    id = n.opts[c].to;
+  }
+  return { seq, end: id };
+}
+
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify({ choices })); } catch (e) {}
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE);
+    if (!raw) return;
+    const v = JSON.parse(raw);
+    if (Array.isArray(v.choices) && walk(v.choices)) choices = v.choices;
+  } catch (e) {}
+}
+
+/* ---------- shared detail renderer ---------- */
+function codeBlock(c) {
+  return `<div class="code"><pre><code>${esc(c)}</code></pre><button type="button" class="copy">Copy</button></div>`;
+}
+function spec(lid, seq) {
+  const L = LEAVES[lid];
+  const design = {};
+  seq.forEach(s => { design[s.n.key] = s.o.val; });
+  return {
+    design,
+    test: lid,
+    status: L.status,
+    call: L.call,
+    assumption_checks: L.checks.map(c => c.k),
+    fallback: L.fb ? (L.fb.to || L.fb.k || null) : null,
+    cross_check: L.xcall
+  };
+}
+function leafDetail(lid, seq, hid) {
+  const L = LEAVES[lid];
+  const st = STATUS[L.status];
+  const checks = L.checks.map(c => `<li>${esc(c.t)}${c.c ? `<code>${esc(c.c)}</code>` : ""}</li>`).join("");
+  let fb = "";
+  if (L.fb) {
+    fb = `<dt>If a check fails</dt><dd><p>${esc(L.fb.t)}</p>` +
+      (L.fb.c ? codeBlock(L.fb.c) : "") +
+      (L.fb.to ? `<button type="button" class="link" data-goto="${L.fb.to}">Open ${esc(LEAVES[L.fb.to].name)} in the map</button>` : "") +
+      `</dd>`;
+  }
+  return `
+    <header class="lh">
+      <h2 id="${hid}" tabindex="-1">${esc(L.name)}</h2>
+      <p class="meta"><span class="badge ${L.status}" title="${esc(st.desc)}"><span class="shape" aria-hidden="true"></span>${st.label}</span><span>${esc(L.family)}</span></p>
+    </header>
+    <dl class="facts">
+      <dt>Use it when</dt><dd><p>${esc(L.when)}</p></dd>
+      <dt>Check first</dt><dd><ul class="checks">${checks}</ul></dd>
+      ${fb}
+      <dt>Run it</dt><dd>${codeBlock(L.run)}</dd>
+      <dt>Cross-check</dt><dd>${codeBlock(L.cross.c)}<p>${esc(L.cross.why)}</p></dd>
+      <dt>Report</dt><dd><p>${esc(L.report)}</p></dd>
+      ${L.post ? `<dt>Post-hoc</dt><dd><p>${esc(L.post)}</p></dd>` : ""}
+      ${L.watch ? `<dt>Watch out</dt><dd><p>${esc(L.watch)}</p></dd>` : ""}
+      <dt>Pipeline spec</dt><dd>${codeBlock(JSON.stringify(spec(lid, seq), null, 2))}<p class="small">What the reasoning layer hands to the pipeline for this path.</p></dd>
+    </dl>
+    <p class="small imports">Snippets assume <code>${esc(IMPORTS)}</code></p>`;
+}
+
+/* ---------- find view ---------- */
+function renderFind(focus) {
+  const w = walk(choices) || walk(choices = []);
+  const { seq, end } = w;
+
+  const items = seq.map((s, i) =>
+    `<li class="done"><button type="button" data-step="${i}" aria-label="Change ${esc(s.n.short)}: ${esc(s.o.tl)}"><span class="q">${esc(s.n.short)}</span><span class="a"><span class="mk">${esc(s.o.tl)}</span></span></button></li>`
+  );
+  if (isLeaf(end)) {
+    items.push(`<li class="end"><span class="q">Test</span><span class="a"><span class="mk full">${esc(LEAVES[leafId(end)].name)}</span></span></li>`);
+  } else {
+    items.push(`<li class="now"><span class="q">${esc(NODES[end].short)}</span><span class="a pending">Not answered yet</span></li>`);
+  }
+  $("#trail").innerHTML = items.join("");
+
+  const stage = $("#stage");
+  if (isLeaf(end)) {
+    stage.innerHTML = `<div class="result">${leafDetail(leafId(end), seq, "qh")}
+      <div class="nav">
+        <button type="button" class="btn" data-act="tomap">Show in full map</button>
+        <button type="button" class="txtbtn" data-act="back">Change last answer</button>
+        <button type="button" class="txtbtn" data-act="restart">Start over</button>
+      </div></div>`;
+  } else {
+    const n = NODES[end];
+    const opts = n.opts.map((o, i) =>
+      `<li><button type="button" class="opt" data-opt="${i}"><span class="key" aria-hidden="true">${i + 1}</span><span><span class="lbl">${esc(o.label)}</span>${o.sub ? `<span class="sub">${esc(o.sub)}</span>` : ""}</span></button></li>`
+    ).join("");
+    stage.innerHTML = `<div class="ask">
+      <h2 id="qh" tabindex="-1">${esc(n.q)}</h2>
+      ${n.help ? `<p class="help">${esc(n.help)}</p>` : ""}
+      <ol class="opts">${opts}</ol>
+      <div class="nav">
+        ${choices.length ? `<button type="button" class="txtbtn" data-act="back">Back</button><button type="button" class="txtbtn" data-act="restart">Start over</button>` : ""}
+        <span class="hint">Press 1–${n.opts.length} to choose</span>
+      </div></div>`;
+  }
+  save();
+  if (focus) { const h = $("#qh"); if (h) h.focus({ preventScroll: true }); }
+}
+
+function choose(i) {
+  const w = walk(choices);
+  if (!w || isLeaf(w.end)) return;
+  if (!NODES[w.end].opts[i]) return;
+  choices = choices.concat(i);
+  renderFind(true);
+  if (window.scrollY > 200) $("#view-find").scrollIntoView({ block: "start" });
+}
+
+/* ---------- map view ---------- */
+function branch(id, prefix) {
+  const n = NODES[id];
+  return `<ul class="branch">${n.opts.map((o, i) => {
+    const p = prefix.concat(i).join(".");
+    if (isLeaf(o.to)) {
+      const lid = leafId(o.to), L = LEAVES[lid];
+      return `<li class="leafrow" data-leaf="${lid}" data-path="${p}"><button type="button" class="leafbtn ${L.status}" data-leaf="${lid}" data-path="${p}"><span class="via">${esc(o.tl)}</span><span class="tname"><span class="shape" aria-hidden="true"></span><span class="sr">${STATUS[L.status].label}: </span>${esc(L.name)}</span></button></li>`;
+    }
+    return `<li><details open data-path="${p}"><summary><span class="via strong">${esc(o.tl)}</span><span class="cq">${esc(NODES[o.to].q)}</span></summary>${branch(o.to, prefix.concat(i))}</details></li>`;
+  }).join("")}</ul>`;
+}
+
+function buildMap() {
+  $("#tree").innerHTML = `<p class="rootq">${esc(NODES.root.q)}</p>${branch("root", [])}`;
+  const ids = Object.keys(LEAVES);
+  const counts = { ready: 0, helper: 0, judgment: 0 };
+  ids.forEach(k => counts[LEAVES[k].status]++);
+  const paths = $$(".leafrow").length;
+  $("#covline").innerHTML = `<strong>${ids.length} tests</strong> reachable through ${paths} decision paths. ${counts.ready} are ready to automate today; the rest need a helper function or your judgment.`;
+  const bar = $("#bar");
+  bar.innerHTML = ["ready", "helper", "judgment"].map(k => `<span class="${k}" style="flex:${counts[k]}"></span>`).join("");
+  bar.setAttribute("aria-label", `${counts.ready} ready, ${counts.helper} need a helper, ${counts.judgment} need your judgment`);
+  const fbtns = [`<button type="button" class="fbtn all" data-filter="all" aria-pressed="true"><span class="ft"><span class="shape" aria-hidden="true"></span>All tests ${ids.length}</span><span class="fd">Every leaf in the tree.</span></button>`]
+    .concat(["ready", "helper", "judgment"].map(k =>
+      `<button type="button" class="fbtn ${k}" data-filter="${k}" aria-pressed="false"><span class="ft"><span class="shape" aria-hidden="true"></span>${STATUS[k].label} ${counts[k]}</span><span class="fd">${STATUS[k].desc}</span></button>`));
+  $("#filters").innerHTML = fbtns.join("");
+}
+
+function applyFilter() {
+  const q = fText.trim().toLowerCase();
+  let shown = 0;
+  $$(".leafrow").forEach(r => {
+    const L = LEAVES[r.dataset.leaf];
+    const okS = fStatus === "all" || L.status === fStatus;
+    const okT = !q || `${L.name} ${L.family} ${L.call} ${L.xcall}`.toLowerCase().includes(q);
+    r.hidden = !(okS && okT);
+    if (!r.hidden) shown++;
+  });
+  $$("#tree details").forEach(d => {
+    d.parentElement.hidden = !d.querySelector(".leafrow:not([hidden])");
+    if (fStatus !== "all" || q) d.open = true;
+  });
+  $$(".fbtn").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.filter === fStatus)));
+  let empty = $("#tree .empty");
+  if (!shown) {
+    if (!empty) $("#tree").insertAdjacentHTML("beforeend", `<p class="empty">No tests match. <button type="button" class="link" data-act="clearfilter">Clear the search and filter</button></p>`);
+  } else if (empty) empty.remove();
+}
+
+function clearFilter() {
+  fStatus = "all"; fText = ""; $("#q").value = "";
+  applyFilter();
+}
+
+function highlightPath(ch) {
+  $$("#tree .on-path").forEach(el => el.classList.remove("on-path"));
+  for (let i = 1; i < ch.length; i++) {
+    const d = $(`#tree details[data-path="${ch.slice(0, i).join(".")}"]`);
+    if (d) { d.classList.add("on-path"); d.open = true; }
+  }
+}
+
+function selectMapLeaf(btn, opts = {}) {
+  $$(".leafbtn[aria-current]").forEach(b => b.removeAttribute("aria-current"));
+  btn.setAttribute("aria-current", "true");
+  const ch = btn.dataset.path.split(".").map(Number);
+  const w = walk(ch);
+  $("#mapDetail").innerHTML = leafDetail(btn.dataset.leaf, w.seq, "mh");
+  $("#mapDetail").scrollTop = 0;
+  highlightPath(ch);
+  if (opts.scrollRow) btn.scrollIntoView({ block: "center" });
+  if (window.matchMedia("(max-width: 900px)").matches && !opts.scrollRow) {
+    $("#mapDetail").scrollIntoView({ block: "start" });
+  }
+}
+
+function openInMap(selector) {
+  showTab("map");
+  clearFilter();
+  const btn = $(selector);
+  if (btn) {
+    selectMapLeaf(btn, { scrollRow: !window.matchMedia("(max-width: 900px)").matches });
+    if (window.matchMedia("(max-width: 900px)").matches) $("#mapDetail").scrollIntoView({ block: "start" });
+  }
+}
+
+/* ---------- tabs ---------- */
+function showTab(which) {
+  const find = which === "find";
+  $("#tab-find").setAttribute("aria-selected", String(find));
+  $("#tab-map").setAttribute("aria-selected", String(!find));
+  $("#tab-find").tabIndex = find ? 0 : -1;
+  $("#tab-map").tabIndex = find ? -1 : 0;
+  $("#view-find").hidden = !find;
+  $("#view-map").hidden = find;
+}
+
+/* ---------- copy ---------- */
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy"); ta.remove(); return ok;
+  } catch (e) { return false; }
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.classList.contains("tab")) { showTab(t.id === "tab-find" ? "find" : "map"); return; }
+  if (t.dataset.opt !== undefined) { choose(Number(t.dataset.opt)); return; }
+  if (t.dataset.step !== undefined) { choices = choices.slice(0, Number(t.dataset.step)); renderFind(true); return; }
+  if (t.classList.contains("leafbtn")) { selectMapLeaf(t); return; }
+  if (t.dataset.filter) { fStatus = t.dataset.filter; applyFilter(); return; }
+  if (t.dataset.goto) { openInMap(`.leafbtn[data-leaf="${t.dataset.goto}"]`); return; }
+  if (t.classList.contains("copy")) {
+    const ok = await copyText(t.previousElementSibling.textContent);
+    t.textContent = ok ? "Copied" : "Select the text to copy";
+    setTimeout(() => { t.textContent = "Copy"; }, 1600);
+    return;
+  }
+  switch (t.dataset.act) {
+    case "back": choices = choices.slice(0, -1); renderFind(true); break;
+    case "restart": choices = []; renderFind(true); break;
+    case "tomap": openInMap(`.leafbtn[data-path="${choices.join(".")}"]`); break;
+    case "clearfilter": clearFilter(); break;
+  }
+});
+
+$("#q").addEventListener("input", e => { fText = e.target.value; applyFilter(); });
+
+$(".tabs").addEventListener("keydown", e => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const next = document.activeElement.id === "tab-find" ? "map" : "find";
+  showTab(next);
+  $(`#tab-${next}`).focus();
+  e.preventDefault();
+});
+
+document.addEventListener("keydown", e => {
+  if ($("#view-find").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea") return;
+  if (/^[1-9]$/.test(e.key)) { choose(Number(e.key) - 1); e.preventDefault(); }
+  else if (e.key === "Backspace" && choices.length) { choices = choices.slice(0, -1); renderFind(true); e.preventDefault(); }
+});
+
+load();
+buildMap();
+renderFind(false);
+</script>
+</body>
+</html>

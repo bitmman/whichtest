@@ -1,0 +1,5 @@
+{
+  "test": "two_by_two",
+  "design": {"goal": "single_outcome", "outcome_type": "binary", "structure": "independent", "predictors": "one_factor_2_levels"},
+  "variables": {"row": "arm", "col": "responder"}
+}
