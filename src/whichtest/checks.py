@@ -12,6 +12,16 @@ from scipy import stats
 
 from .result import CheckResult
 
+def pg_col(frame, *names: str) -> str:
+    """The first column of a pingouin frame matching any of ``names`` after normalising '-'/'_' and '%'."""
+    norm = {c.replace("-", "_").rstrip("%"): c for c in frame.columns}
+    for n in names:
+        key = n.replace("-", "_").rstrip("%")
+        if key in norm:
+            return norm[key]
+    raise KeyError(f"none of {names} in {list(frame.columns)}")
+
+
 __all__ = [
     "shapiro",
     "shapiro_groups",

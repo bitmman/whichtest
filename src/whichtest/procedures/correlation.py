@@ -156,7 +156,7 @@ def partial_corr(df: pd.DataFrame, spec: Spec) -> TestResult:
             "pingouin.partial_corr",
             "Correlating residuals gives the same coefficient. Its p-value uses too many degrees of freedom, so trust pingouin's.",
             {"r": r_resid, "p": p},
-            {"r": float(pc["r"].iloc[0]), "p": float(pc["p-val"].iloc[0] if "p-val" in pc.columns else pc["p_val"].iloc[0])},
+            {"r": float(pc["r"].iloc[0]), "p": float(pc[checks.pg_col(pc, "p-val", "p_val")].iloc[0])},
             rtol=1e-6,
             atol=1e-8,
         )

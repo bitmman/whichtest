@@ -264,7 +264,9 @@ def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
         ests.append(Estimate("1 − KM (naive) at end of follow-up", naive_ci_end, note="overstates incidence"))
         extra["aalen_johansen"] = {"time": [float(x) for x in cif.index], "cif": [float(x) for x in cif.values]}
     except ImportError:
-        ests.append(Estimate("1 − KM (naive) at end of follow-up", naive_ci_end, note="lifelines not installed; no Aalen–Johansen"))
+        if estimand == "cumulative_incidence":
+            raise SpecError("cumulative incidence needs lifelines (Aalen–Johansen): pip install 'whichtest[cross]'") from None
+        ests.append(Estimate("1 − KM (naive) at end of follow-up", naive_ci_end, note="lifelines not installed; no Aalen–Johansen cross-check"))
     stat_name, stat, p, dfree = "", None, None, None
     if estimand == "cause_specific_hazard":
         if not (v.predictors or v.formula):

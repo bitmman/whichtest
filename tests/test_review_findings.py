@@ -127,8 +127,9 @@ def test_f6_icc_inference_and_ci_match_pingouin(form, icc_data):
     row = ref.iloc[["ICC1", "ICC2", "ICC3", "ICC1k", "ICC2k", "ICC3k"].index(form)]
     assert r.statistic == pytest.approx(float(row["F"]), rel=1e-6)
     assert r.df == (float(row["df1"]), float(row["df2"]))
-    assert r.effect_size.ci[0] == pytest.approx(float(row["CI95"][0]), abs=0.0051)
-    assert r.effect_size.ci[1] == pytest.approx(float(row["CI95"][1]), abs=0.0051)
+    ci_col = [c for c in ref.columns if c.startswith("CI")][0]  # 'CI95' or, in older pingouin, 'CI95%'
+    assert r.effect_size.ci[0] == pytest.approx(float(row[ci_col][0]), abs=0.0051)
+    assert r.effect_size.ci[1] == pytest.approx(float(row[ci_col][1]), abs=0.0051)
 
 
 def test_f7_icc_ci_follows_requested_level(icc_data):

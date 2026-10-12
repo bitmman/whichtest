@@ -200,7 +200,7 @@ def friedman(df: pd.DataFrame, spec: Spec) -> TestResult:
             "pingouin.friedman",
             "Same statistic. pingouin also reports Kendall's W.",
             {"Q": res.statistic, "p": res.pvalue, "W": kw.value},
-            {"Q": float(pf["Q"].iloc[0]), "p": float(pf["p_unc"].iloc[0]), "W": float(pf["W"].iloc[0])},
+            {"Q": float(pf["Q"].iloc[0]), "p": float(pf[checks.pg_col(pf, "p_unc")].iloc[0]), "W": float(pf["W"].iloc[0])},
         )
     except ImportError:
         pass

@@ -325,7 +325,7 @@ def cochran_q_test(df: pd.DataFrame, spec: Spec) -> TestResult:
             "pingouin.cochran",
             "Second implementation. Q and p should match.",
             {"Q": res.statistic, "p": res.pvalue},
-            {"Q": float(pc["Q"].iloc[0]), "p": float(pc["p_unc"].iloc[0])},
+            {"Q": float(pc["Q"].iloc[0]), "p": float(pc[checks.pg_col(pc, "p_unc")].iloc[0])},
         )
     except ImportError:
         pass

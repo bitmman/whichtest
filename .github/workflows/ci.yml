@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: py${{ matrix.python }} / ${{ matrix.resolution }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        resolution: ["highest", "lowest-direct"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install (dev + cross extras)
+        run: uv sync --extra dev --resolution ${{ matrix.resolution }}
+      - name: Report versions
+        run: uv run python -c "import sys, numpy, pandas, scipy, statsmodels, pingouin, lifelines, sklearn; print(sys.version); [print(m.__name__, m.__version__) for m in (numpy, pandas, scipy, statsmodels, pingouin, lifelines, sklearn)]"
+      - name: Test
+        run: uv run pytest -q
+
+  base-only:
+    name: base install (no cross extra)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install without optional cross-check libraries
+        run: |
+          uv sync
+          uv pip install pytest
+      - name: Every procedure runs; missing cross-checks are reported, never silent
+        run: uv run --no-sync pytest -q tests/test_base_install.py
+      - name: CLI works from a base install
+        run: |
+          uv run --no-sync whichtest list >/dev/null
+          uv run --no-sync whichtest run examples/spec_responders.json examples/trial.csv
+
+  wheel:
+    name: wheel install smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv build
+      - name: Install the wheel into a clean venv and run an example
+        run: |
+          uv venv /tmp/wheel-venv
+          uv pip install --python /tmp/wheel-venv/bin/python dist/*.whl
+          cd /tmp
+          /tmp/wheel-venv/bin/whichtest list | head -3
+          /tmp/wheel-venv/bin/whichtest run "$GITHUB_WORKSPACE/examples/spec_table_only.json"

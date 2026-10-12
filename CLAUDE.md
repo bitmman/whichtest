@@ -50,7 +50,8 @@ Design work so far happened in a claude.ai chat on 2026-10-12. The interactive t
   - `cli.py` — `list`, `show`, `resolve`, `ask` (terminal wizard), `tree`, `check`, `run`.
 - `.claude/skills/whichtest/SKILL.md` — the skill (Claude Code project skill; the text is model-agnostic). `reference/questions.md` is generated: `uv run whichtest tree --out .claude/skills/whichtest/reference/questions.md`.
 - `tests/` — pytest. `test_procedures.py` runs every ready and helper test on one synthetic dataset and asserts the cross-check agrees; `test_judgment.py` checks every judgment test refuses without decisions and runs with them; the exact identities listed under "Verify before trusting" are separate tests.
-- `examples/` — synthetic `trial.csv` and three specs.
+- `examples/` — synthetic `trial.csv` and four specs.
+- `.github/workflows/ci.yml` — three jobs: the suite on Python 3.10–3.13 × {highest, lowest-direct} resolutions; a **base-only install** (no `cross` extra) that runs `tests/test_base_install.py` and the CLI; a wheel build installed into a clean venv. `tests/test_base_install.py` also runs in the dev environment by blocking the optional imports, so the "every procedure runs; missing cross-checks are reported as NOT RUN, never silent" contract is checked on every run.
 - `taxonomy.json` — the full decision tree as data. **Source of truth for test selection.** Large (~80 KB): read it with tools when needed rather than importing it into context.
   - `nodes`: question id → `{ q, key, opts }`. Each option has `val` (the spec value for that answer) and `to` (next node id, or `L:<test_id>`).
   - `tests`: test id → `{ name, family, status, when, checks[], fb, run, call, cross, xcall, report, post?, watch? }`.
@@ -134,7 +135,8 @@ The code snippets in `taxonomy.json` were written from library knowledge, not ex
 - `MNLogit.conf_int()` has an awkward index; the procedure uses `params ± z·bse` instead.
 - GLM results have no `llr_pvalue`; compute the LR test from `llf` and `llnull`.
 - `krippendorff` has no `__version__`.
-- Pins: `scipy>=1.11` (CI on `ttest_ind` results), `statsmodels>=0.14`.
+- Pins: `scipy>=1.11` (CI on `ttest_ind` results), `statsmodels>=0.14`, `lifelines>=0.28` (0.27 calls `Series.iteritems`, removed in pandas 2.0), `semopy>=2.3.11` (earlier 2.3.x depend on the bogus `sklearn` stub package, which fails to build). The suite passes at the floor (Python 3.10, numpy 1.24, pandas 2.0, scipy 1.11.1, statsmodels 0.14.0, pingouin 0.5.4, lifelines 0.28.0, scikit-learn 1.3.0; `uv sync --resolution lowest-direct`) and at the ceiling.
+- pingouin renamed columns between 0.5 and 0.7 (`p-unc` → `p_unc`, `CI95%` → `CI95`, `p-GG-corr` → `p_GG_corr`); read them through `checks.pg_col()`, never by literal name.
 
 **Verified 2026-10-12, helper tests:** all 11 run. Deviations found:
 
@@ -154,9 +156,10 @@ The code snippets in `taxonomy.json` were written from library knowledge, not ex
 - `statsmodels.multivariate.factor.Factor` returns complex-typed loadings (`np.real` them); `rotate()` works in place and returns None. pingouin has no KMO; it is computed in `multivariate.py`.
 - `mixedlm.fit(method=[...])` accepts a list of optimizers to try in turn; random slopes on data without slope variance still end on the boundary, which the `convergence` check reports.
 
+**Verified 2026-10-12, confirmatory factor analysis** (semopy 2.3.11, now in the `cross` extra): `Model(syntax).fit(df)` works with lavaan-style `=~` syntax; `inspect(std_est=True)` adds an `Est. Std` column and prints fixed parameters (the first loading per factor) as the string `"-"`, so convert with a tolerant `float()`; `calc_stats()` returns one row with `DoF`, `chi2`, `chi2 p-value`, `CFI`, `TLI`, `RMSEA`. The branch's cross-check is an exploratory ML solution with the same number of factors (Tucker congruence ≥ 0.85 per factor), and a `model_fit` check applies CFI ≥ 0.95, RMSEA ≤ 0.06. Tests in `tests/test_cfa.py` (correct structure fits and agrees; a one-factor model on two-factor data fails the fit check).
+
 Still unverified:
 
-- semopy (confirmatory factor analysis): not installed, not exercised; the `confirmatory` branch of `factor_sem` is untested.
 - Exact-agreement cross-checks (paired t vs one-sample t on differences, Spearman vs Pearson on ranks, AUC vs Mann–Whitney U / (n₁n₀), exact McNemar vs binomial on discordant pairs, logit vs binomial GLM, point-biserial vs Student's t) are unit tests in `tests/test_procedures.py` and pass.
 
 Known holes in the Python ecosystem:
@@ -233,7 +236,7 @@ Runtime results recorded in this session: existing suite at `e7135ed` 142 passed
 - R8 `blocks()` and `paired()` take `numeric=False` for nominal procedures: Cohen's and Fleiss' kappa, Stuart–Maxwell and McNemar keep string labels through complete-case selection and code them afterwards (`categorical._sorted_levels`). Weighted kappa on string labels needs `params.levels` (an ordered list).
 - R9 AUC with fewer than two cases in a class: `delong.py` raises; `roc_auc` returns the point estimate with no CI, no z/p, a failed `ci_method` check and a warning (so it is flagged); `delong` rejects with a `SpecError`.
 
-Still open after round two: typed validation of `params`/`decisions` as a whole (the count/exposure/table/event-code inputs are now validated, but the dicts are still free-form); a CI matrix and base-only install; the confirmatory `factor_sem` branch.
+Still open after round two: typed validation of `params`/`decisions` as a whole (the count/exposure/table/event-code inputs are now validated, but the dicts are still free-form). Done after round two, while round three was pending: the CI matrix, base-only install job and wheel smoke test (`.github/workflows/ci.yml`, `tests/test_base_install.py`); the confirmatory `factor_sem` branch (semopy, `tests/test_cfa.py`); and `competing` with `estimand=cumulative_incidence` now refuses to run without lifelines instead of returning only the naive 1 − KM.
 
 ## Conventions
 

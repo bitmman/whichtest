@@ -326,26 +326,56 @@ def factor_sem(df: pd.DataFrame, spec: Spec) -> TestResult:
         except ImportError:
             raise SpecError("confirmatory analysis needs semopy (pip install semopy)") from None
         model = semopy.Model(str(syntax))
-        model.fit(items)
+        opt = model.fit(items)
         st = semopy.calc_stats(model)
-        ins = model.inspect()
+        ins = model.inspect(std_est=True)
+
+        def num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):  # semopy prints fixed parameters as "-"
+                return float("nan")
+
         load = ins[ins["op"] == "~"]
+        latents = list(dict.fromkeys(load["rval"]))
+        L_cfa = pd.DataFrame(0.0, index=items_cols, columns=latents)
         for _, r in load.iterrows():
-            ests.append(Estimate(f"{r['rval']} → {r['lval']}", float(r["Estimate"]), note=f"SE {float(r['Std. Err']) if pd.notna(r['Std. Err']) else float('nan'):.3f}, p = {float(r['p-value']) if pd.notna(r['p-value']) else float('nan'):.3g}"))
+            if r["lval"] in L_cfa.index:
+                L_cfa.loc[r["lval"], r["rval"]] = num(r["Est. Std"])
+            ests.append(Estimate(f"{r['rval']} → {r['lval']} (standardized)", num(r["Est. Std"]), note=f"unstandardized {num(r['Estimate']):.3f}" + ("" if np.isnan(num(r["Std. Err"])) else f", SE {num(r['Std. Err']):.3f}, p = {num(r['p-value']):.3g}")))
         fit = {c: float(st[c].iloc[0]) for c in ("CFI", "TLI", "RMSEA", "chi2", "chi2 p-value", "DoF") if c in st.columns}
-        extra.update({"model_syntax": syntax, "fit": fit})
+        extra.update({"model_syntax": syntax, "fit": fit, "converged": bool(getattr(opt, "success", True)), "standardized_loadings": {c: {f: float(L_cfa.loc[c, f]) for f in latents} for c in items_cols}})
+        # cross-check: an exploratory ML solution with as many factors should recover the same structure
+        k = len(latents)
+        fa = Factor(items, n_factor=k, method="ml").fit()
+        if k > 1:
+            fa.rotate("varimax")
+        L_efa = np.real(np.asarray(fa.loadings))
+
+        def congr(a, b):
+            return float(a @ b / np.sqrt((a @ a) * (b @ b))) if (a @ a) > 0 and (b @ b) > 0 else 0.0
+
+        cong, used = {}, set()
+        for f in latents:
+            best = max(((abs(congr(L_cfa[f].to_numpy(), L_efa[:, i])), i) for i in range(k) if i not in used), default=(0.0, None))
+            cong[f] = best[0]
+            if best[1] is not None:
+                used.add(best[1])
         cc = compare(
-            "fit indices against conventional cut-offs (CFI ≥ 0.95, RMSEA ≤ 0.06)",
-            "Fit indices tell you whether the specified structure holds.",
-            {"CFI": fit.get("CFI"), "RMSEA_ok": 1.0},
-            {"CFI": 0.95 if fit.get("CFI", 0) >= 0.95 else fit.get("CFI"), "RMSEA_ok": 1.0 if fit.get("RMSEA", 1) <= 0.06 else 0.0},
+            f"exploratory ML factor analysis with {k} factor(s) (statsmodels Factor)",
+            "Exploratory loadings should resemble the structure you'd specify confirmatorily. Fit indices tell you whether it holds.",
+            {f"congruence[{f}]": 1.0 for f in latents},
+            {f"congruence[{f}]": c for f, c in cong.items()},
             kind="exact",
             rtol=0.0,
-            atol=1e-9,
-            detail=", ".join(f"{k} = {v:.3f}" for k, v in fit.items()),
+            atol=0.15,
+            detail="Tucker congruence ≥ 0.85 between each confirmatory factor and its best-matching exploratory factor counts as agreement",
         )
-        ests.append(Estimate("CFI", fit.get("CFI")))
-        ests.append(Estimate("RMSEA", fit.get("RMSEA")))
+        cfi, rmsea = fit.get("CFI", float("nan")), fit.get("RMSEA", float("nan"))
+        chk.append(CheckResult("model_fit", "Acceptable fit (CFI ≥ 0.95 and RMSEA ≤ 0.06)", bool(cfi >= 0.95 and rmsea <= 0.06), cfi, fit.get("chi2 p-value"), ", ".join(f"{k_} = {v:.3f}" for k_, v in fit.items())))
+        ests.append(Estimate("CFI", cfi))
+        ests.append(Estimate("TLI", fit.get("TLI")))
+        ests.append(Estimate("RMSEA", rmsea))
     return TestResult(
         test="factor_sem",
         name=f"{'Exploratory factor analysis' if approach == 'exploratory' else 'Confirmatory factor analysis'}",

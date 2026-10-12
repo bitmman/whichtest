@@ -233,9 +233,12 @@ def rm_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
             "pingouin.rm_anova",
             "The uncorrected F should match AnovaRM. pingouin adds the Greenhouse–Geisser correction that statsmodels lacks.",
             {"F": F, "p": p},
-            {"F": float(row["F"]), "p": float(row["p_unc"])},
+            {"F": float(row["F"]), "p": float(row[checks.pg_col(rm, "p_unc")])},
         )
-        p_gg = float(row["p_GG_corr"]) if "p_GG_corr" in rm.columns else None
+        try:
+            p_gg = float(row[checks.pg_col(rm, "p_GG_corr", "p-GG-corr")])
+        except KeyError:
+            p_gg = None
         eps = float(row["eps"]) if "eps" in rm.columns else None
         ss_t, ss_e = float(row["SS"]), float(rm.iloc[1]["SS"])
         eff = Estimate("partial η²", ss_t / (ss_t + ss_e), note=f"generalized η² = {float(row['ng2']):.3f}" if "ng2" in rm.columns else "")

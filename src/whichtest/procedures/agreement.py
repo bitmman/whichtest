@@ -486,7 +486,7 @@ def icc(df: pd.DataFrame, spec: Spec) -> TestResult:
         pg_pos = {"ICC1": 0, "ICC2": 1, "ICC3": 2, "ICC1k": 3, "ICC2k": 4, "ICC3k": 5}
         row = res.iloc[pg_pos[form]]
         primary = {"icc": value, "F": F, "df1": float(df1), "df2": float(df2), "p": p_f}
-        secondary = {"icc": float(row["ICC"]), "F": float(row["F"]), "df1": float(row["df1"]), "df2": float(row["df2"]), "p": float(row["pval"])}
+        secondary = {"icc": float(row["ICC"]), "F": float(row["F"]), "df1": float(row["df1"]), "df2": float(row["df2"]), "p": float(row[checks.pg_col(res, "pval", "p-val", "p_val")])}
         if abs(spec.ci_level - 0.95) < 1e-9:  # pingouin only reports a 95% interval, rounded to 2 decimals
             ci_col = [c for c in res.columns if c.startswith("CI")][0]
             primary.update({"ci_low": round(ci[0], 2), "ci_high": round(ci[1], 2)})
