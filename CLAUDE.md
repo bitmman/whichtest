@@ -47,8 +47,9 @@ Design work so far happened in a claude.ai chat on 2026-10-12. The interactive t
   - `checks.py`, `effects.py` — shared assumption checks and effect sizes.
   - `delong.py` — DeLong AUC variance and paired AUC comparison (not in any library).
   - `procedures/` — one module per family (`multivariate.py` holds MANOVA / MANCOVA / multivariate regression). Each procedure is `fn(df, spec) -> TestResult` and must set `checks` and `cross_check`.
-  - `cli.py` — `list`, `show`, `resolve`, `ask` (terminal wizard), `check`, `run`.
-- `tests/` — pytest. `test_procedures.py` runs every ready and helper test on one synthetic dataset and asserts the cross-check agrees; the exact identities listed under "Verify before trusting" are separate tests.
+  - `cli.py` — `list`, `show`, `resolve`, `ask` (terminal wizard), `tree`, `check`, `run`.
+- `.claude/skills/whichtest/SKILL.md` — the skill (Claude Code project skill; the text is model-agnostic). `reference/questions.md` is generated: `uv run whichtest tree --out .claude/skills/whichtest/reference/questions.md`.
+- `tests/` — pytest. `test_procedures.py` runs every ready and helper test on one synthetic dataset and asserts the cross-check agrees; `test_judgment.py` checks every judgment test refuses without decisions and runs with them; the exact identities listed under "Verify before trusting" are separate tests.
 - `examples/` — synthetic `trial.csv` and three specs.
 - `taxonomy.json` — the full decision tree as data. **Source of truth for test selection.** Large (~80 KB): read it with tools when needed rather than importing it into context.
   - `nodes`: question id → `{ q, key, opts }`. Each option has `val` (the spec value for that answer) and `to` (next node id, or `L:<test_id>`).
@@ -141,11 +142,19 @@ The code snippets in `taxonomy.json` were written from library knowledge, not ex
 - `statsmodels.graphics.mean_diff_plot` draws its limits with the **population** SD (`ddof=0`); the reported limits use `ddof=1`, so compare like with like.
 - `sklearn.metrics.confusion_matrix` needs `labels=[0, 1]` or a single-class input collapses to a 1×1 matrix.
 
-Still unverified (judgment tests):
+**Verified 2026-10-12, judgment tests:** all 12 run. Deviations found:
 
-- statsmodels `phreg(...).fit(groups=...)` for cluster-robust Cox standard errors.
-- Signatures of `smf.ordinal_gee` and `smf.nominal_gee`.
-- `pingouin.intraclass_corr`.
+- `smf.ordinal_gee('y ~ x', ...)` adds an intercept that collides with the thresholds (parameters blow up to 1e14). Use the array interface `sm.OrdinalGEE(y, X_without_intercept, groups, cov_struct=...)`.
+- `sm.NominalGEE` contrasts each category with the **last**; `mnlogit` with the **first**. Re-base before comparing directions.
+- `ZeroInflatedNegativeBinomialP` fails to converge (NaN SEs) when the data aren't overdispersed (α on the boundary). Fit Nelder–Mead from ZIP start values, then refine with BFGS and keep the NM fit if BFGS returns non-finite SEs.
+- `phreg(...).fit(groups=...)` and `phreg(..., strata=...)` match `lifelines.CoxPHFitter(cluster_col=...)` / `strata=[...]` to 1e-6.
+- `pingouin.intraclass_corr` labels rows `ICC(1,1)`, `ICC(A,1)`, `ICC(C,1)`, `ICC(1,k)`, `ICC(A,k)`, `ICC(C,k)` in a fixed order; the CI column is `CI95`. The Shrout–Fleiss formulas from the two-way ANOVA mean squares reproduce all six.
+- `statsmodels.multivariate.factor.Factor` returns complex-typed loadings (`np.real` them); `rotate()` works in place and returns None. pingouin has no KMO; it is computed in `multivariate.py`.
+- `mixedlm.fit(method=[...])` accepts a list of optimizers to try in turn; random slopes on data without slope variance still end on the boundary, which the `convergence` check reports.
+
+Still unverified:
+
+- semopy (confirmatory factor analysis): not installed, not exercised; the `confirmatory` branch of `factor_sem` is untested.
 - Exact-agreement cross-checks (paired t vs one-sample t on differences, Spearman vs Pearson on ranks, AUC vs Mann–Whitney U / (n₁n₀), exact McNemar vs binomial on discordant pairs, logit vs binomial GLM, point-biserial vs Student's t) are unit tests in `tests/test_procedures.py` and pass.
 
 Known holes in the Python ecosystem:
@@ -162,8 +171,22 @@ Started 2026-10-12 on the user's go-ahead.
 2. ✅ Pipeline registry: `test_id → procedure`, each returning a structured result.
 3. ✅ The 28 `ready` tests, each with a unit test where the cross-check must agree.
 4. ✅ The 11 `helper` tests, including DeLong (`delong.py`, fast DeLong after Sun & Xu 2014; validated against sklearn's AUC and a stratified paired bootstrap in `tests/test_delong.py`).
-5. ⬜ The skill: a SKILL.md that walks the taxonomy questions, records its reasoning, and emits a spec.
-6. ⬜ The 12 `judgment` tests, gated on explicit human-decision fields in the spec.
+5. ✅ The skill: `.claude/skills/whichtest/SKILL.md` walks the taxonomy questions, records its reasoning, and emits a spec. `reference/questions.md` beside it is generated by `whichtest tree` (a test fails if it drifts).
+6. ✅ The 12 `judgment` tests, gated on explicit human-decision fields in the spec (`procedures/mixed.py` for lmm and the GEEs; the rest in their family modules). `run()` copies `spec.decisions` into `result.extra["decisions"]` so every judgment result shows what it was run with.
+
+### Judgment decision keys
+
+| test | `spec.decisions` | extra variable roles |
+| --- | --- | --- |
+| `factorial_anova` | `ss_type` (2 or 3), `include_interaction` (bool) | `predictors` = the factors |
+| `lmm` | `re_formula` (`"1"` intercept only, `"~time"` adds a slope), `reml` (bool) | `subject` |
+| `gee_cont`, `gee_logit`, `gee_poisson` | `working_correlation` (independence, exchangeable, ar1, unstructured) | `subject`; `exposure` for Poisson |
+| `ordinal_gee`, `nominal_gee` | `working_correlation` (global_odds_ratio, independence) | `subject` |
+| `zip` | `count_distribution` (poisson, negbin), `inflation_formula` (RHS, `"1"` = intercept only) | |
+| `competing` | `estimand` (cumulative_incidence, cause_specific_hazard), `event_of_interest` (event code; 0 = censored) | `event` holds the event type |
+| `cox_cluster` | `approach` (cluster_robust, stratify) | `cluster` or `strata` |
+| `factor_sem` | `approach` (exploratory: + `n_factors`, `rotation`; confirmatory: + `model_syntax`, needs semopy) | `columns` = items |
+| `icc` | `icc_form` (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k, or the ICC(2,1)/ICC(A,1) spellings) | `columns` or `outcome`+`subject`+`within` |
 
 ### Adding a test
 

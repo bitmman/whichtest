@@ -170,3 +170,169 @@ def cox(df: pd.DataFrame, spec: Spec) -> TestResult:
         warnings=warnings,
         extra={"formula": f"{v.time} ~ {rhs}", "ties": "efron", "log_hr": {nm: float(b) for nm, b in zip(names, res.params)}},
     )
+
+
+# ---------------------------------------------------------------------------
+# Competing risks (judgment: estimand, event of interest)
+# ---------------------------------------------------------------------------
+@procedure("competing", requires=("time", "event"), decisions=("estimand", "event_of_interest"))
+def competing(df: pd.DataFrame, spec: Spec) -> TestResult:
+    v = spec.variables
+    estimand = str(spec.decisions["estimand"]).lower()
+    if estimand not in ("cumulative_incidence", "cause_specific_hazard"):
+        raise SpecError("decisions.estimand must be 'cumulative_incidence' or 'cause_specific_hazard'")
+    eoi = spec.decisions["event_of_interest"]
+    d = df.dropna(subset=[v.time, v.event]).copy()
+    t = d[v.time].to_numpy(float)
+    et = d[v.event].to_numpy()
+    if str(eoi) not in {str(x) for x in np.unique(et)}:
+        raise SpecError(f"event_of_interest {eoi!r} not among event codes {np.unique(et).tolist()} (0 = censored)")
+    is_eoi = (et.astype(str) == str(eoi)).astype(int)
+    any_event = (et.astype(str) != "0").astype(int)
+    n_eoi, n_comp, n_cens = int(is_eoi.sum()), int(any_event.sum() - is_eoi.sum()), int((any_event == 0).sum())
+    naive = SurvfuncRight(t, is_eoi)
+    naive_ci_end = float(1 - naive.surv_prob[-1]) if len(naive.surv_prob) else 0.0
+    timepoints = list(spec.params.get("timepoints", []))
+    ests: list[Estimate] = []
+    cc = None
+    extra: dict = {"events": {"of_interest": n_eoi, "competing": n_comp, "censored": n_cens}}
+    try:
+        from lifelines import AalenJohansenFitter
+
+        codes = pd.Categorical(et.astype(str)).codes if not np.issubdtype(et.dtype, np.number) else et.astype(int)
+        eoi_code = int(eoi) if np.issubdtype(et.dtype, np.number) else int(pd.Categorical(et.astype(str)).categories.get_loc(str(eoi)))
+        ajf = AalenJohansenFitter(calculate_variance=True, seed=int(spec.params.get("seed", 0))).fit(t, codes, event_of_interest=eoi_code)
+        cif = ajf.cumulative_density_.iloc[:, 0]
+        aj_end = float(cif.iloc[-1])
+        cc = compare(
+            "1 − naive Kaplan–Meier treating competing events as censored",
+            "One minus naive Kaplan–Meier overstates cumulative incidence. The size of the gap shows how much competing risks matter here.",
+            {"cumulative_incidence_at_end": aj_end},
+            {"cumulative_incidence_at_end": naive_ci_end},
+            kind="exact",
+            rtol=0.0,
+            atol=float("inf"),
+            detail=f"Aalen–Johansen {aj_end:.3f} vs 1 − KM {naive_ci_end:.3f}: gap = {naive_ci_end - aj_end:+.3f} (the naive estimate must be ≥; the gap is the competing-risk bias)",
+        )
+        cc.agrees = bool(naive_ci_end >= aj_end - 1e-9)
+        ci_df = ajf.confidence_interval_
+        for tp in timepoints:
+            idx = cif.index.searchsorted(tp, side="right") - 1
+            val = float(cif.iloc[idx]) if idx >= 0 else 0.0
+            lo = float(ci_df.iloc[idx, 1]) if idx >= 0 else 0.0
+            hi = float(ci_df.iloc[idx, 0]) if idx >= 0 else 0.0
+            ests.append(Estimate(f"cumulative incidence of {eoi} at {tp:g}", val, (min(lo, hi), max(lo, hi)), spec.ci_level, "Aalen–Johansen"))
+        ests.append(Estimate(f"cumulative incidence of {eoi} at end of follow-up", aj_end, note="Aalen–Johansen"))
+        ests.append(Estimate("1 − KM (naive) at end of follow-up", naive_ci_end, note="overstates incidence"))
+        extra["aalen_johansen"] = {"time": [float(x) for x in cif.index], "cif": [float(x) for x in cif.values]}
+    except ImportError:
+        ests.append(Estimate("1 − KM (naive) at end of follow-up", naive_ci_end, note="lifelines not installed; no Aalen–Johansen"))
+    stat_name, stat, p, dfree = "", None, None, None
+    if estimand == "cause_specific_hazard":
+        if not (v.predictors or v.formula):
+            raise SpecError("cause_specific_hazard needs variables.predictors (or formula) for the Cox model")
+        if v.formula:
+            rhs = v.formula.split("~", 1)[1].strip()
+        else:
+            cat = set(v.categorical)
+            rhs = " + ".join(f"C({p_})" if (p_ in cat or not pd.api.types.is_numeric_dtype(d[p_])) else p_ for p_ in v.predictors)
+        dd = d.dropna(subset=list(v.predictors)).copy()
+        status = (dd[v.event].astype(str) == str(eoi)).astype(int).to_numpy()
+        res = smf.phreg(f"{v.time} ~ {rhs}", dd, status=status, ties="efron").fit()
+        names = list(res.model.exog_names)
+        ci = res.conf_int(alpha=1 - spec.ci_level)
+        ests += [_Est(f"cause-specific HR {nm}", float(np.exp(b)), (float(np.exp(ci[i, 0])), float(np.exp(ci[i, 1]))), spec.ci_level, f"p = {float(res.pvalues[i]):.3g}") for i, (nm, b) in enumerate(zip(names, res.params))]
+        from scipy import stats as _st
+
+        lr = float(2 * (res.llf - res.model.loglike(np.zeros(len(names)))))
+        stat_name, stat, p, dfree = "LR χ² (cause-specific Cox)", lr, float(_st.chi2.sf(lr, len(names))), float(len(names))
+        extra["cause_specific_cox"] = {"formula": f"{v.time} ~ {rhs}", "competing events treated as": "censored"}
+    chk = [checks.note("estimand", "Estimand chosen: cause-specific hazards for etiology, cumulative incidence for prognosis", f"{estimand}; event of interest = {eoi!r}; chosen by the user")]
+    return TestResult(
+        test="competing",
+        n={"subjects": int(len(d)), "events_of_interest": n_eoi, "competing_events": n_comp},
+        statistic_name=stat_name,
+        statistic=stat,
+        p=p,
+        df=dfree,
+        estimates=ests,
+        checks=chk,
+        cross_check=cc,
+        warnings=["Fine–Gray subdistribution hazards are not available in statsmodels or lifelines; cause-specific hazards are reported instead."] if estimand == "cause_specific_hazard" else [],
+        extra=extra,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Clustered / stratified Cox (judgment: approach)
+# ---------------------------------------------------------------------------
+@procedure("cox_cluster", requires=("time", "event", "predictors|formula", "cluster|strata"), decisions=("approach",))
+def cox_cluster(df: pd.DataFrame, spec: Spec) -> TestResult:
+    import patsy
+
+    v = spec.variables
+    approach = str(spec.decisions["approach"]).lower()
+    if approach not in ("cluster_robust", "stratify"):
+        raise SpecError("decisions.approach must be 'cluster_robust' or 'stratify'")
+    if approach == "cluster_robust" and not v.cluster:
+        raise SpecError("cluster_robust needs variables.cluster")
+    if approach == "stratify" and not v.strata:
+        raise SpecError("stratify needs variables.strata")
+    if v.formula:
+        rhs = v.formula.split("~", 1)[1].strip()
+    else:
+        cat = set(v.categorical)
+        rhs = " + ".join(f"C({p})" if (p in cat or not pd.api.types.is_numeric_dtype(df[p])) else p for p in v.predictors)
+    extra_col = v.cluster if approach == "cluster_robust" else v.strata
+    d = df.dropna(subset=[v.time, v.event, extra_col, *v.predictors]).copy()
+    status = d[v.event].to_numpy(float)
+    if approach == "cluster_robust":
+        res = smf.phreg(f"{v.time} ~ {rhs}", d, status=status, ties="efron").fit(groups=d[v.cluster].to_numpy())
+    else:
+        res = smf.phreg(f"{v.time} ~ {rhs}", d, status=status, strata=d[v.strata].to_numpy(), ties="efron").fit()
+    names = list(res.model.exog_names)
+    cc = None
+    try:
+        from lifelines import CoxPHFitter
+
+        X = patsy.dmatrix(rhs, d, return_type="dataframe").drop(columns="Intercept", errors="ignore")
+        ld = X.copy()
+        ld["_time"], ld["_event"] = d.loc[X.index, v.time].to_numpy(float), status
+        if approach == "cluster_robust":
+            ld["_cluster"] = d.loc[X.index, v.cluster].to_numpy()
+            cph = CoxPHFitter().fit(ld, duration_col="_time", event_col="_event", cluster_col="_cluster")
+        else:
+            ld["_strata"] = d.loc[X.index, v.strata].to_numpy()
+            cph = CoxPHFitter().fit(ld, duration_col="_time", event_col="_event", strata=["_strata"])
+        cc = compare(
+            f"lifelines.CoxPHFitter ({'cluster_col' if approach == 'cluster_robust' else 'strata'})",
+            "lifelines' cluster-robust standard errors should be close to statsmodels'.",
+            {**{f"coef[{nm}]": float(b) for nm, b in zip(names, res.params)}, **{f"se[{nm}]": float(s) for nm, s in zip(names, res.bse)}},
+            {**{f"coef[{nm}]": float(cph.params_[nm]) for nm in names}, **{f"se[{nm}]": float(cph.standard_errors_[nm]) for nm in names}},
+            rtol=1e-3,
+            atol=1e-6,
+        )
+    except ImportError:
+        pass
+    n_clusters = int(d[extra_col].nunique())
+    chk = [
+        CheckResult("cluster_count", "Enough clusters for robust standard errors (≥ 40)" if approach == "cluster_robust" else "Enough events within each stratum", bool(n_clusters >= 40) if approach == "cluster_robust" else bool(d.groupby(extra_col)[v.event].sum().min() >= 5), float(n_clusters), None, f"{n_clusters} {'clusters' if approach == 'cluster_robust' else 'strata'}" + ("" if approach == "cluster_robust" else f"; min events per stratum = {int(d.groupby(extra_col)[v.event].sum().min())}")),
+        checks.note("frailty_vs_robust", "Robust SEs and frailty models answer different questions. Choose deliberately", f"approach = {approach}; chosen by the user"),
+    ]
+    ci = res.conf_int(alpha=1 - spec.ci_level)
+    ests = [_Est(f"HR {nm}", float(np.exp(b)), (float(np.exp(ci[i, 0])), float(np.exp(ci[i, 1]))), spec.ci_level, f"p = {float(res.pvalues[i]):.3g}") for i, (nm, b) in enumerate(zip(names, res.params))]
+    from scipy import stats as _st
+
+    lr = float(2 * (res.llf - res.model.loglike(np.zeros(len(names)))))
+    return TestResult(
+        test="cox_cluster",
+        n={"subjects": int(len(d)), "events": int(status.sum()), ("clusters" if approach == "cluster_robust" else "strata"): n_clusters},
+        statistic_name="LR χ² (model)",
+        statistic=lr,
+        p=float(_st.chi2.sf(lr, len(names))),
+        df=float(len(names)),
+        estimates=ests,
+        checks=chk,
+        cross_check=cc,
+        extra={"formula": f"{v.time} ~ {rhs}", "approach": approach, "by": extra_col},
+    )

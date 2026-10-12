@@ -281,3 +281,78 @@ def rm_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
         warnings=warnings,
         extra=extra,
     )
+
+
+# ---------------------------------------------------------------------------
+# Factorial ANOVA (judgment: sums-of-squares type, interaction)
+# ---------------------------------------------------------------------------
+@procedure("factorial_anova", requires=("outcome", "predictors"), decisions=("ss_type", "include_interaction"))
+def factorial_anova(df: pd.DataFrame, spec: Spec) -> TestResult:
+    import statsmodels.formula.api as smf
+
+    v = spec.variables
+    factors = list(v.predictors)
+    if len(factors) < 2:
+        raise SpecError("factorial_anova needs at least two factors in variables.predictors")
+    ss_type = int(spec.decisions["ss_type"])
+    if ss_type not in (2, 3):
+        raise SpecError("decisions.ss_type must be 2 or 3")
+    inter = bool(spec.decisions["include_interaction"])
+    d = df.dropna(subset=[v.outcome, *factors]).copy()
+    op = " * " if inter else " + "
+    f2 = f"{v.outcome} ~ " + op.join(f"C({a})" for a in factors)
+    f3 = f"{v.outcome} ~ " + op.join(f"C({a}, Sum)" for a in factors)
+    m2 = smf.ols(f2, d).fit()
+    m3 = smf.ols(f3, d).fit()
+    t2 = sm.stats.anova_lm(m2, typ=2)
+    t3 = sm.stats.anova_lm(m3, typ=3)
+    chosen, other, m = (t3, t2, m3) if ss_type == 3 else (t2, t3, m2)
+    # terms line up after stripping the contrast spec
+    def key(t: str) -> str:
+        return t.replace(", Sum", "")
+
+    terms = [t for t in chosen.index if t != "Residual" and t != "Intercept"]
+    cc = compare(
+        f"Type {'II' if ss_type == 3 else 'III'} sums of squares (the other convention)",
+        "In a balanced design Types II and III agree. If they don't, the design is unbalanced and you need to choose deliberately.",
+        {f"p[{key(t)}]": float(chosen.loc[t, "PR(>F)"]) for t in terms},
+        {f"p[{key(t)}]": float(other.loc[[o for o in other.index if key(o) == key(t)][0], "PR(>F)"]) for t in terms},
+        kind="approximate",
+        alpha=spec.alpha,
+        detail="unbalanced designs make the two conventions diverge; both tables are in extra",
+    )
+    ss_res = float(chosen.loc["Residual", "sum_sq"])
+    ests = []
+    for t in terms:
+        ests.append(Estimate(f"{key(t)}: F", float(chosen.loc[t, "F"]), note=f"df = ({chosen.loc[t, 'df']:g}, {chosen.loc['Residual', 'df']:g}), p = {float(chosen.loc[t, 'PR(>F)']):.3g}, partial η² = {float(chosen.loc[t, 'sum_sq']) / (float(chosen.loc[t, 'sum_sq']) + ss_res):.3f}"))
+    cells = d.groupby(factors, observed=True)[v.outcome]
+    cell_arrays = [g.to_numpy(float) for _, g in cells]
+    counts = cells.size()
+    balanced = bool(counts.min() == counts.max())
+    chk = [
+        checks.shapiro(np.asarray(m.resid), "residual_normality", "Residuals roughly normal", spec.alpha),
+        checks.levene(cell_arrays, "cell_variance", "Similar variances across cells", spec.alpha),
+        CheckResult("balance", "Count subjects per cell. Unbalanced designs change the answer", balanced, float(counts.min()), None, f"cell sizes {counts.min()}–{counts.max()}" + ("" if balanced else "; unbalanced: Type II vs III matters, see cross-check")),
+    ]
+    warnings = []
+    last = terms[-1] if inter else None
+    if inter and float(chosen.loc[last, "PR(>F)"]) < spec.alpha:
+        warnings.append("The interaction is significant: main effects are hard to interpret; report simple effects.")
+    if chk[1].passed is False:
+        hc3 = m.get_robustcov_results(cov_type="HC3")
+        warnings.append("Cell variances differ: consider HC3 robust standard errors or a permutation test on the interaction.")
+    primary_term = last if inter else terms[0]
+    return TestResult(
+        test="factorial_anova",
+        n=int(m.nobs),
+        statistic_name=f"F ({key(primary_term)})",
+        statistic=float(chosen.loc[primary_term, "F"]),
+        p=float(chosen.loc[primary_term, "PR(>F)"]),
+        df=(float(chosen.loc[primary_term, "df"]), float(chosen.loc["Residual", "df"])),
+        estimates=ests,
+        effect_size=Estimate(f"partial η² ({key(primary_term)})", float(chosen.loc[primary_term, "sum_sq"]) / (float(chosen.loc[primary_term, "sum_sq"]) + ss_res)),
+        checks=chk,
+        cross_check=cc,
+        warnings=warnings,
+        extra={"ss_type": ss_type, "include_interaction": inter, "type2": {key(i): {c: (None if pd.isna(x) else float(x)) for c, x in r.items()} for i, r in t2.iterrows()}, "type3": {key(i): {c: (None if pd.isna(x) else float(x)) for c, x in r.items()} for i, r in t3.iterrows()}, "cell_means": {str(k): float(np.mean(g)) for k, g in zip(counts.index, cell_arrays)}},
+    )

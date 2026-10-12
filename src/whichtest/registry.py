@@ -37,6 +37,7 @@ _MODULES = (
     "whichtest.procedures.correlation",
     "whichtest.procedures.agreement",
     "whichtest.procedures.multivariate",
+    "whichtest.procedures.mixed",
 )
 _loaded = False
 
@@ -110,6 +111,9 @@ def run(spec: Spec | dict[str, Any], data: pd.DataFrame | None = None, taxonomy:
     result.name = result.name or info.name
     result.status = info.status
     result.alpha = spec.alpha
+    if info.status == "judgment":
+        # every judgment result carries the human decisions it was run with
+        result.extra["decisions"] = dict(spec.decisions)
     if result.fallback is None and info.fallback and result.failed_checks:
         result.fallback = {
             "to": info.fallback.to,

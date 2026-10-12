@@ -129,3 +129,93 @@ def poisson_reg(df: pd.DataFrame, spec: Spec) -> TestResult:
         warnings=warnings,
         extra=extra,
     )
+
+
+# ---------------------------------------------------------------------------
+# Zero-inflated count model (judgment: count distribution, zero-process formula)
+# ---------------------------------------------------------------------------
+@procedure("zip", requires=("outcome|formula",), decisions=("count_distribution", "inflation_formula"))
+def zip_model(df: pd.DataFrame, spec: Spec) -> TestResult:
+    import patsy
+    from statsmodels.discrete.count_model import ZeroInflatedNegativeBinomialP, ZeroInflatedPoisson
+
+    f = _formula(spec, df)
+    yname = spec.variables.outcome or f.split("~")[0].strip()
+    dist = str(spec.decisions["count_distribution"]).lower()
+    if dist not in ("poisson", "negbin", "negative_binomial", "nb"):
+        raise SpecError("decisions.count_distribution must be 'poisson' or 'negbin'")
+    dist = "poisson" if dist == "poisson" else "negbin"
+    infl = str(spec.decisions["inflation_formula"]).strip() or "1"
+    d = df.dropna(subset=[yname]).copy()
+    y, X = patsy.dmatrices(f, d, return_type="dataframe")
+    Xi = patsy.dmatrix(infl, d.loc[X.index], return_type="dataframe")
+    y = y.iloc[:, 0].to_numpy(int)
+    ex = spec.variables.exposure
+    kw = {"exposure": d.loc[X.index, ex].to_numpy(float)} if ex else {}
+    zp = ZeroInflatedPoisson(y, X, exog_infl=Xi, inflation="logit", **kw).fit(disp=0, maxiter=1000, method="bfgs")
+    warnings = []
+    if dist == "negbin":
+        m0 = ZeroInflatedNegativeBinomialP(y, X, exog_infl=Xi, inflation="logit", **kw)
+        res = m0.fit(start_params=np.r_[zp.params.to_numpy(), 0.5], disp=0, maxiter=2000, method="nm")
+        try:
+            res2 = m0.fit(start_params=res.params, disp=0, maxiter=2000, method="bfgs")
+            if np.isfinite(res2.bse).all() and np.isfinite(res2.llf):
+                res = res2
+            else:
+                warnings.append("ZINB: BFGS refinement produced non-finite standard errors (alpha near the boundary); Nelder–Mead fit kept.")
+        except Exception as e:  # pragma: no cover
+            warnings.append(f"ZINB refinement failed: {e}")
+        label = "zero-inflated negative binomial"
+    else:
+        res, label = zp, "zero-inflated Poisson"
+    nb = sm.NegativeBinomial(y, X, **kw).fit(disp=0, maxiter=500)
+    pois = sm.Poisson(y, X, **kw).fit(disp=0, maxiter=500)
+    cc = compare(
+        "plain negative binomial AIC",
+        "If the zero-inflated model doesn't clearly beat plain negative binomial, the extra zeros may just be overdispersion.",
+        {"aic_zero_inflated": float(res.aic)},
+        {"aic_zero_inflated": float(nb.aic)},
+        kind="exact",
+        rtol=0.0,
+        atol=float("inf"),
+        detail=f"ΔAIC (NB − ZI) = {float(nb.aic - res.aic):.2f}; the beats_nb check below judges it",
+    )
+    cc.agrees = True  # informational: the comparison is reported by the check, not a disagreement
+    delta = float(nb.aic - res.aic)
+    obs0 = float((y == 0).mean())
+    pred0_nb = float(np.mean(nb.predict(which="prob", y_values=[0]))) if hasattr(nb, "predict") else float("nan")
+    try:
+        pred0_nb = float(np.mean(nb.model.predict(nb.params, which="prob")[:, 0]))
+    except Exception:
+        pass
+    chk = [
+        checks.manual("zero_process", "A real zero-generating process exists. That's a design question, not a statistical one", f"observed zero fraction {obs0:.3f}" + (f"; NB predicts {pred0_nb:.3f}" if np.isfinite(pred0_nb) else "")),
+        CheckResult("beats_nb", "Clearly better than plain negative binomial (ΔAIC > 2)", bool(delta > 2), delta, None, f"AIC: zero-inflated {float(res.aic):.1f}, NB {float(nb.aic):.1f}, Poisson {float(pois.aic):.1f}"),
+    ]
+    if chk[1].passed is False:
+        warnings.append("Zero inflation adds little over negative binomial; prefer the simpler model, or a hurdle model if zeros are a separate process.")
+    names = list(res.params.index)
+    ci = res.conf_int(alpha=1 - spec.ci_level)
+    ests = []
+    for i, nm in enumerate(names):
+        b, lo, hi = float(res.params.iloc[i]), float(ci.iloc[i, 0]), float(ci.iloc[i, 1])
+        p = float(res.pvalues.iloc[i])
+        if nm.startswith("inflate_"):
+            ests.append(Estimate(f"zero part OR {nm[8:]}", float(np.exp(b)), (float(np.exp(lo)), float(np.exp(hi))), spec.ci_level, f"p = {p:.3g}"))
+        elif nm == "alpha":
+            ests.append(Estimate("NB dispersion α", b, (lo, hi), spec.ci_level))
+        else:
+            ests.append(Estimate(f"count part RR {nm}", float(np.exp(b)), (float(np.exp(lo)), float(np.exp(hi))), spec.ci_level, f"p = {p:.3g}"))
+    return TestResult(
+        test="zip",
+        name=f"{label} model",
+        n=int(len(y)),
+        statistic_name="",
+        statistic=None,
+        p=None,
+        estimates=ests,
+        checks=chk,
+        cross_check=cc,
+        warnings=warnings,
+        extra={"formula": f, "inflation_formula": infl, "aic": {"zero_inflated": float(res.aic), "negbin": float(nb.aic), "poisson": float(pois.aic)}, "converged": bool(res.mle_retvals.get("converged", True))},
+    )

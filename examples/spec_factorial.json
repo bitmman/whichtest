@@ -1,0 +1,11 @@
+{
+  "test": "factorial_anova",
+  "design": {"goal": "single_outcome", "outcome_type": "continuous", "structure": "independent", "predictors": "two_plus_factors"},
+  "variables": {"outcome": "sbp_week12", "predictors": ["arm", "sex"]},
+  "decisions": {"ss_type": 3, "include_interaction": true},
+  "reasoning": [
+    "Two crossed between-subject factors (arm × sex) on a continuous outcome.",
+    "Cells are unbalanced, so Type III sums of squares were chosen by the analyst; the Type II table is kept in extra for comparison.",
+    "Interaction included because the question is whether the drug effect differs by sex."
+  ]
+}

@@ -72,6 +72,8 @@ class Variables(BaseModel):
     time: str | None = Field(None, description="Follow-up time for survival data.")
     event: str | None = Field(None, description="Event indicator (1 = event, 0 = censored).")
     exposure: str | None = Field(None, description="Exposure / person-time for count outcomes.")
+    cluster: str | None = Field(None, description="Cluster id (site, family) for cluster-robust inference.")
+    strata: str | None = Field(None, description="Stratification variable (e.g. for a stratified Cox model).")
     predictors: list[str] = Field(default_factory=list, description="Right-hand-side columns for a regression.")
     categorical: list[str] = Field(default_factory=list, description="Which predictors to treat as categorical.")
     formula: str | None = Field(None, description="Explicit patsy formula; overrides outcome/predictors.")

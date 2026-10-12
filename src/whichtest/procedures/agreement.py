@@ -374,3 +374,100 @@ def delong(df: pd.DataFrame, spec: Spec) -> TestResult:
         cross_check=cc,
         extra={"delong_se": res["se"], "bootstrap_se": boot_se},
     )
+
+
+# ---------------------------------------------------------------------------
+# Intraclass correlation (judgment: ICC form)
+# ---------------------------------------------------------------------------
+_ICC_FORMS = {
+    "ICC1": "ICC1", "ICC(1,1)": "ICC1", "ICC(1)": "ICC1",
+    "ICC2": "ICC2", "ICC(2,1)": "ICC2", "ICC(A,1)": "ICC2",
+    "ICC3": "ICC3", "ICC(3,1)": "ICC3", "ICC(C,1)": "ICC3",
+    "ICC1K": "ICC1k", "ICC(1,K)": "ICC1k",
+    "ICC2K": "ICC2k", "ICC(2,K)": "ICC2k", "ICC(A,K)": "ICC2k",
+    "ICC3K": "ICC3k", "ICC(3,K)": "ICC3k", "ICC(C,K)": "ICC3k",
+}
+_ICC_PG = {"ICC1": "ICC1", "ICC2": "ICC2", "ICC3": "ICC3", "ICC1k": "ICC1k", "ICC2k": "ICC2k", "ICC3k": "ICC3k"}
+_ICC_DESC = {
+    "ICC1": "ICC(1,1): one-way random, single rater, absolute agreement",
+    "ICC2": "ICC(2,1): two-way random, single rater, absolute agreement",
+    "ICC3": "ICC(3,1): two-way mixed, single rater, consistency",
+    "ICC1k": "ICC(1,k): one-way random, average of k raters",
+    "ICC2k": "ICC(2,k): two-way random, average of k raters, absolute agreement",
+    "ICC3k": "ICC(3,k): two-way mixed, average of k raters, consistency",
+}
+
+
+@procedure("icc", requires=("columns|outcome",), decisions=("icc_form",))
+def icc(df: pd.DataFrame, spec: Spec) -> TestResult:
+    import statsmodels.api as sm
+    import statsmodels.formula.api as smf
+
+    form_raw = str(spec.decisions["icc_form"]).upper().replace(" ", "")
+    form = _ICC_FORMS.get(form_raw)
+    if form is None:
+        raise SpecError(f"decisions.icc_form must be one of {sorted(set(_ICC_PG))}; got {spec.decisions['icc_form']!r}")
+    m = blocks(df, spec)
+    n, k = m.shape
+    if k < 2:
+        raise SpecError("icc needs at least two raters / measurements")
+    long = m.reset_index().melt(id_vars=m.index.name or "index", var_name="rater", value_name="score").rename(columns={m.index.name or "index": "target"})
+    ols = smf.ols("score ~ C(target) + C(rater)", long).fit()
+    tab = sm.stats.anova_lm(ols)
+    msr, msc, mse = (float(tab.loc[i, "mean_sq"]) for i in ("C(target)", "C(rater)", "Residual"))
+    ols1 = smf.ols("score ~ C(target)", long).fit()
+    tab1 = sm.stats.anova_lm(ols1)
+    msr1, msw = float(tab1.loc["C(target)", "mean_sq"]), float(tab1.loc["Residual", "mean_sq"])
+    # Shrout & Fleiss (1979) / McGraw & Wong (1996)
+    manual = {
+        "ICC1": (msr1 - msw) / (msr1 + (k - 1) * msw),
+        "ICC2": (msr - mse) / (msr + (k - 1) * mse + k * (msc - mse) / n),
+        "ICC3": (msr - mse) / (msr + (k - 1) * mse),
+        "ICC1k": (msr1 - msw) / msr1,
+        "ICC2k": (msr - mse) / (msr + (msc - mse) / n),
+        "ICC3k": (msr - mse) / msr,
+    }
+    value = float(manual[form])
+    ci = None
+    cc = None
+    try:
+        import pingouin as pg
+
+        res = pg.intraclass_corr(data=long, targets="target", raters="rater", ratings="score")
+        # pingouin labels the rows ICC(1,1), ICC(A,1), ICC(C,1), ICC(1,k), ICC(A,k), ICC(C,k) in a fixed order
+        pg_pos = {"ICC1": 0, "ICC2": 1, "ICC3": 2, "ICC1k": 3, "ICC2k": 4, "ICC3k": 5}
+        row = res.iloc[pg_pos[form]]
+        ci_col = [c for c in res.columns if c.startswith("CI")][0]
+        ci_raw = row[ci_col]
+        ci = (float(ci_raw[0]), float(ci_raw[1]))
+        cc = compare(
+            "two-way ANOVA mean squares in the Shrout–Fleiss formula",
+            "Plug the mean squares into the Shrout–Fleiss formula. It should reproduce pingouin's row.",
+            {"icc": float(row["ICC"])},
+            {"icc": value},
+            rtol=1e-6,
+        )
+        value = float(row["ICC"])
+        extra_all = {t: float(res.iloc[i]["ICC"]) for t, i in pg_pos.items()}
+    except ImportError:
+        extra_all = manual
+    chk = [
+        checks.note("icc_form", "Form chosen: one-way or two-way, random or fixed raters, agreement or consistency, single or average", _ICC_DESC[form] + "; chosen by the user"),
+        checks.shapiro(np.asarray(ols.resid), "residual_normality", "Residuals roughly normal", spec.alpha),
+    ]
+    dropped = m.attrs.get("dropped", 0)
+    if dropped:
+        chk.append(CheckResult("complete_ratings", "Every target rated by every rater", False, detail=f"{dropped} incomplete target(s) dropped"))
+    return TestResult(
+        test="icc",
+        n={"targets": int(n), "raters": int(k)},
+        statistic_name="F (targets)",
+        statistic=float(tab.loc["C(target)", "F"]),
+        p=float(tab.loc["C(target)", "PR(>F)"]),
+        df=(float(tab.loc["C(target)", "df"]), float(tab.loc["Residual", "df"])),
+        effect_size=Estimate(_ICC_DESC[form].split(":")[0], value, ci, spec.ci_level if ci else None, _ICC_DESC[form].split(": ")[1]),
+        estimates=[Estimate(f"{t} (not chosen)", v) for t, v in extra_all.items() if t != form],
+        checks=chk,
+        cross_check=cc,
+        extra={"form": form, "mean_squares": {"targets": msr, "raters": msc, "residual": mse}},
+    )

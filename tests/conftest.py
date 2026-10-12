@@ -53,4 +53,38 @@ def clinical(rng):
     df["score_a"] = df.truth + rng.normal(size=n)
     df["score_b"] = 0.5 * df.truth + rng.normal(size=n)
     df["test_pos"] = (df.score_a > 0.5).astype(int)
+    # judgment-test columns
+    df["factor_b"] = rng.choice(["u", "v", "w"], n)
+    df["site"] = rng.integers(0, 45, n)
+    df["stage"] = rng.integers(1, 4, n)
+    df["zcnt"] = np.where(rng.random(n) < 0.35, 0, rng.negative_binomial(2, 2 / (2 + np.exp(0.5 + 0.4 * (df.group == "trt")))))
+    df["etype"] = np.where(df.event == 1, rng.choice([1, 2], n, p=[0.6, 0.4]), 0)
+    for i in range(6):
+        df[f"item{i}"] = rng.normal(size=n)
+    f1, f2 = rng.normal(size=n), rng.normal(size=n)
+    for i in range(3):
+        df[f"item{i}"] += f1
+        df[f"item{i + 3}"] += f2
     return df
+
+
+@pytest.fixture(scope="session")
+def longitudinal(rng):
+    """60 subjects × 4 visits, long format, with every outcome type."""
+    ns, nt = 60, 4
+    d = pd.DataFrame({"id": np.repeat(range(ns), nt), "visit": np.tile(range(nt), ns)})
+    d["group"] = np.repeat(rng.choice(["a", "b"], ns), nt)
+    d["y"] = 1 + 0.5 * d.visit + 0.8 * (d.group == "b") + np.repeat(rng.normal(0, 1, ns), nt) + rng.normal(0, 0.7, len(d))
+    d["ybin"] = (rng.random(len(d)) < 1 / (1 + np.exp(-(d.y - 2)))).astype(int)
+    d["cnt"] = rng.poisson(np.exp(0.2 + 0.2 * d.visit))
+    d["months"] = rng.uniform(1, 3, len(d))
+    d["yord"] = pd.cut(d.y + rng.logistic(size=len(d)), [-np.inf, 1, 2.5, np.inf], labels=[0, 1, 2]).astype(int)
+    d["ynom"] = rng.choice(["x", "y", "z"], len(d))
+    return d
+
+
+@pytest.fixture(scope="session")
+def ratings(rng):
+    d = pd.DataFrame({"patient": np.repeat(range(30), 3), "rater": np.tile(["r1", "r2", "r3"], 30)})
+    d["score"] = np.repeat(rng.normal(50, 10, 30), 3) + rng.normal(0, 3, 90) + np.tile([0, 1, 2], 30)
+    return d

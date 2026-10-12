@@ -235,3 +235,128 @@ def mv_reg(df: pd.DataFrame, spec: Spec) -> TestResult:
         cross_check=cc,
         extra={"joint_tests": joint},
     )
+
+
+# ---------------------------------------------------------------------------
+# Factor analysis / SEM (judgment: approach, factors, rotation or model syntax)
+# ---------------------------------------------------------------------------
+def _kmo_bartlett(items: pd.DataFrame) -> tuple[float, float, float]:
+    from scipy import stats
+
+    R = items.corr().to_numpy()
+    n, p = items.shape
+    inv = np.linalg.pinv(R)
+    dd = np.sqrt(np.outer(np.diag(inv), np.diag(inv)))
+    partial = -inv / dd
+    np.fill_diagonal(partial, 0)
+    r2 = R.copy()
+    np.fill_diagonal(r2, 0)
+    kmo = (r2**2).sum() / ((r2**2).sum() + (partial**2).sum())
+    chi2 = -(n - 1 - (2 * p + 5) / 6) * np.log(np.linalg.det(R))
+    dof = p * (p - 1) / 2
+    return float(kmo), float(chi2), float(stats.chi2.sf(chi2, dof))
+
+
+@procedure("factor_sem", requires=("columns",), decisions=("approach",))
+def factor_sem(df: pd.DataFrame, spec: Spec) -> TestResult:
+    from statsmodels.multivariate.factor import Factor
+
+    items_cols = _outcomes(spec, df)
+    items = df[items_cols].apply(pd.to_numeric, errors="coerce").dropna()
+    approach = str(spec.decisions["approach"]).lower()
+    if approach not in ("exploratory", "confirmatory"):
+        raise SpecError("decisions.approach must be 'exploratory' or 'confirmatory'")
+    n, p = items.shape
+    kmo, bart_chi2, bart_p = _kmo_bartlett(items)
+    chk = [
+        checks.note("approach", "Exploratory or confirmatory. That's a design decision", f"{approach}; chosen by the user"),
+        CheckResult("sample_size", "Enough subjects per item (≥ 10 per item, n ≥ 100)", bool(n >= max(100, 10 * p)), float(n / p), None, f"n = {n}, {p} items → {n / p:.1f} per item"),
+        CheckResult("factorability", "Items correlated enough to factor (KMO ≥ 0.6, Bartlett p < 0.05)", bool(kmo >= 0.6 and bart_p < 0.05), kmo, bart_p, f"KMO = {kmo:.3f}; Bartlett χ² = {bart_chi2:.1f}, p = {bart_p:.3g}"),
+    ]
+    warnings = ["This is model building, not test selection: the loadings and fit are a starting point for a person, not a result."]
+    ests: list[Estimate] = []
+    extra: dict = {"kmo": kmo}
+    cc = None
+    if approach == "exploratory":
+        k = spec.decisions.get("n_factors")
+        if not k:
+            raise SpecError("exploratory factor analysis needs decisions.n_factors")
+        k = int(k)
+        rotation = spec.decisions.get("rotation", "varimax")
+        fa = Factor(items, n_factor=k, method="ml").fit()
+        if rotation and str(rotation).lower() != "none":
+            fa.rotate(str(rotation))
+        L = np.real(np.asarray(fa.loadings))
+        pa = Factor(items, n_factor=k, method="pa").fit()
+        if rotation and str(rotation).lower() != "none":
+            pa.rotate(str(rotation))
+        L2 = np.real(np.asarray(pa.loadings))
+        # Tucker congruence between ML and principal-axis loadings, matching columns by best congruence
+        def congr(a, b):
+            return float(a @ b / np.sqrt((a @ a) * (b @ b)))
+
+        cong = []
+        used = set()
+        for j in range(k):
+            best = max(((abs(congr(L[:, j], L2[:, i])), i) for i in range(k) if i not in used), default=(0.0, None))
+            cong.append(best[0])
+            if best[1] is not None:
+                used.add(best[1])
+        cc = compare(
+            "principal-axis factoring with the same rotation",
+            "Exploratory loadings should resemble the structure you'd specify confirmatorily. Two extraction methods should give congruent loadings.",
+            {f"congruence[factor {j + 1}]": 1.0 for j in range(k)},
+            {f"congruence[factor {j + 1}]": c for j, c in enumerate(cong)},
+            kind="exact",
+            rtol=0.0,
+            atol=0.15,
+            detail="Tucker congruence ≥ 0.85 counts as agreement",
+        )
+        for j in range(k):
+            ests.append(Estimate(f"factor {j + 1}: loadings", None, note=", ".join(f"{c} {L[i, j]:+.2f}" for i, c in enumerate(items_cols))))
+        uniq = np.real(np.asarray(fa.uniqueness))
+        ests.append(Estimate("communalities", None, note=", ".join(f"{c} {1 - u:.2f}" for c, u in zip(items_cols, uniq))))
+        extra.update({"n_factors": k, "rotation": rotation, "loadings": {c: [float(x) for x in L[i]] for i, c in enumerate(items_cols)}, "uniqueness": {c: float(u) for c, u in zip(items_cols, uniq)}})
+    else:
+        syntax = spec.decisions.get("model_syntax")
+        if not syntax:
+            raise SpecError("confirmatory factor analysis needs decisions.model_syntax (lavaan-style, for semopy)")
+        try:
+            import semopy
+        except ImportError:
+            raise SpecError("confirmatory analysis needs semopy (pip install semopy)") from None
+        model = semopy.Model(str(syntax))
+        model.fit(items)
+        st = semopy.calc_stats(model)
+        ins = model.inspect()
+        load = ins[ins["op"] == "~"]
+        for _, r in load.iterrows():
+            ests.append(Estimate(f"{r['rval']} → {r['lval']}", float(r["Estimate"]), note=f"SE {float(r['Std. Err']) if pd.notna(r['Std. Err']) else float('nan'):.3f}, p = {float(r['p-value']) if pd.notna(r['p-value']) else float('nan'):.3g}"))
+        fit = {c: float(st[c].iloc[0]) for c in ("CFI", "TLI", "RMSEA", "chi2", "chi2 p-value", "DoF") if c in st.columns}
+        extra.update({"model_syntax": syntax, "fit": fit})
+        cc = compare(
+            "fit indices against conventional cut-offs (CFI ≥ 0.95, RMSEA ≤ 0.06)",
+            "Fit indices tell you whether the specified structure holds.",
+            {"CFI": fit.get("CFI"), "RMSEA_ok": 1.0},
+            {"CFI": 0.95 if fit.get("CFI", 0) >= 0.95 else fit.get("CFI"), "RMSEA_ok": 1.0 if fit.get("RMSEA", 1) <= 0.06 else 0.0},
+            kind="exact",
+            rtol=0.0,
+            atol=1e-9,
+            detail=", ".join(f"{k} = {v:.3f}" for k, v in fit.items()),
+        )
+        ests.append(Estimate("CFI", fit.get("CFI")))
+        ests.append(Estimate("RMSEA", fit.get("RMSEA")))
+    return TestResult(
+        test="factor_sem",
+        name=f"{'Exploratory factor analysis' if approach == 'exploratory' else 'Confirmatory factor analysis'}",
+        n=int(n),
+        statistic_name="Bartlett χ²",
+        statistic=bart_chi2,
+        p=bart_p,
+        df=float(p * (p - 1) / 2),
+        estimates=ests,
+        checks=chk,
+        cross_check=cc,
+        warnings=warnings,
+        extra=extra,
+    )

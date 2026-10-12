@@ -5,7 +5,7 @@ Give it a study design and your data; it picks the right test, checks the assump
 ## How it's built
 
 - **Pipeline** (`whichtest` package): plain Python that runs a test from an explicit spec. Use it directly when you already know the test.
-- **Skill**: the reasoning layer on top. Works out which test fits and writes the spec. Can run on a local model when the study is private. (Not written yet; the `whichtest ask` wizard is the deterministic stand-in.)
+- **Skill** (`.claude/skills/whichtest/`): the reasoning layer on top. Works out which test fits, records why, and writes the spec. The instructions are model-agnostic, so a local model can run them when the study is private. `whichtest ask` is the deterministic stand-in.
 - **Cross-check**: every test is re-run through an independent implementation. If they disagree, the result is flagged.
 
 ## Quick start
@@ -35,6 +35,7 @@ result.flagged                 # True if a check failed or the cross-check disag
 
 ## What's here
 
+- `.claude/skills/whichtest/`: the skill (`SKILL.md`) and its generated question-tree reference.
 - `src/whichtest/`: the package. `taxonomy.py` reads the tree, `spec.py` is the contract, `registry.py` dispatches, `procedures/` hold the tests.
 - `stat-test-finder.html`: open in a browser. Click through the decision tree, or browse the full map.
 - `taxonomy.json`: the same tree as data. This is what the code reads.
@@ -44,8 +45,8 @@ result.flagged                 # True if a check failed or the cross-check disag
 ## Where it stands
 
 - Taxonomy done: 51 tests across 54 decision paths.
-- **39 of 51 tests implemented**: all 28 ready and all 11 helper tests (including a DeLong implementation validated against a bootstrap), each with assumption checks, effect sizes, a cross-check, and a unit test (`uv run whichtest list`).
-- 12 judgment tests are still to do. They will refuse to run until `spec.decisions` is filled in.
-- No skill yet.
+- **All 51 tests implemented**, each with assumption checks, effect sizes, an independent cross-check, and a unit test (`uv run whichtest list`). Includes a DeLong implementation validated against a bootstrap.
+- The 12 judgment tests refuse to run until `spec.decisions` carries the human choices (`uv run whichtest show lmm` lists them), and echo those choices in the result.
+- Skill written; not yet exercised on a real study.
 
-Next: the skill, then the 12 judgment tests.
+Next: try it on a real (synthetic-stand-in) analysis end to end, then tighten what the skill asks.

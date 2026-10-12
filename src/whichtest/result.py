@@ -136,6 +136,8 @@ class TestResult:
             lines.append("  effect size: " + _fmt_est(self.effect_size))
         for e in self.estimates:
             lines.append("  " + _fmt_est(e))
+        if self.extra.get("decisions"):
+            lines.append("  decisions (set by a human): " + ", ".join(f"{k}={v!r}" for k, v in self.extra["decisions"].items()))
         if self.checks:
             lines.append("  assumption checks:")
             for c in self.checks:
@@ -151,7 +153,8 @@ class TestResult:
             if cc.detail:
                 lines.append(f"    {cc.detail}")
         if self.fallback:
-            lines.append(f"  fallback suggested: {self.fallback.get('to') or self.fallback.get('technique')} — {self.fallback.get('text', '')}")
+            because = self.fallback.get("because")
+            lines.append(f"  fallback suggested: {self.fallback.get('to') or self.fallback.get('technique')} — {self.fallback.get('text', '')}" + (f" (because: {', '.join(because)})" if because else ""))
         for w in self.warnings:
             lines.append(f"  warning: {w}")
         if self.flagged:
