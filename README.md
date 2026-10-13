@@ -44,7 +44,7 @@ uv tool install "whichtest[cross] @ git+https://github.com/bitmman/whichtest.git
 pip install "whichtest[cross] @ git+https://github.com/bitmman/whichtest.git"        # into the current environment
 ```
 
-`[cross]` adds the independent libraries used for cross-checks (pingouin, lifelines, semopy, ...). Without it every test still runs, but each result says its cross-check was not run and is flagged.
+Append `@v0.1.0` to the URL to pin the released version. `[cross]` adds the independent libraries used for cross-checks (pingouin, lifelines, semopy, ...). Without it every test still runs, but each result says its cross-check was not run and is flagged.
 
 **2. Install the skill** (pick one):
 
