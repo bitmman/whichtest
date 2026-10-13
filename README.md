@@ -33,6 +33,33 @@ print(result.summary())
 result.flagged                 # True if a check failed or the cross-check disagreed
 ```
 
+## Install the skill in Claude Code
+
+The skill is a folder, `.claude/skills/whichtest/`, holding `SKILL.md` and a generated question reference. Claude Code loads skills from a project's `.claude/skills/` and from your personal `~/.claude/skills/`. The skill shells out to the `whichtest` command, so install the package first, then put the folder where Claude Code will find it.
+
+**1. Install the package** so `whichtest` is on your PATH (pick one):
+
+```bash
+uv tool install "whichtest[cross] @ git+https://github.com/bitmman/whichtest.git"   # isolated CLI, recommended
+pip install "whichtest[cross] @ git+https://github.com/bitmman/whichtest.git"        # into the current environment
+```
+
+`[cross]` adds the independent libraries used for cross-checks (pingouin, lifelines, semopy, ...). Without it every test still runs, but each result says its cross-check was not run and is flagged.
+
+**2. Install the skill** (pick one):
+
+```bash
+git clone https://github.com/bitmman/whichtest.git
+cp -r whichtest/.claude/skills/whichtest ~/.claude/skills/          # for every project you open in Claude Code
+cp -r whichtest/.claude/skills/whichtest /path/to/your/project/.claude/skills/   # for one project only
+```
+
+If you work inside this repository, nothing to copy: Claude Code picks the skill up from `.claude/skills/` here, and `uv run whichtest` stands in for an installed `whichtest`.
+
+**3. Use it.** Start Claude Code in the folder with your data and describe the study ("two-arm trial, blood pressure at week 12 adjusted for baseline, which test?"), or type `/whichtest`. The skill asks only the taxonomy's questions, writes `spec.json`, validates it with `whichtest check`, runs `whichtest run`, and reports. For judgment tests (mixed models, GEE, factor analysis, competing risks, ICC, factorial ANOVA) it stops and asks for your modelling decisions instead of choosing them. It inspects your data by column names and dtypes only; no data rows are read into the model's context, and nothing but column names and the design leaves the machine.
+
+**Other models.** `SKILL.md` is plain Markdown with no Claude-specific syntax. Any agent that can run shell commands can follow it; a local model can run it when the study is private.
+
 ## What's here
 
 - `.claude/skills/whichtest/`: the skill (`SKILL.md`) and its generated question-tree reference.
