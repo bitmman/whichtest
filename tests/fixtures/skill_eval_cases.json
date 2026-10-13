@@ -1,0 +1,59 @@
+[
+  {"id": "paired_change", "from_r3": true},
+  {"id": "adjusted_parallel_trial", "from_r3": true},
+  {"id": "treatment_by_visit", "from_r3": true,
+   "accept_formula": "arm.*\\*.*week|week.*\\*.*arm", "accept_re_formula": ["~week", "week"]},
+
+  {"id": "los_two_wards", "difficulty": 1,
+   "description": "We compared length of hospital stay in days between patients admitted to ward A and ward B over one year. Each patient appears once. Stay lengths are strongly right-skewed with a few very long stays. Is the typical stay different between the two wards? Columns: patient_id, ward, los_days.",
+   "expected_spec": {"test": "indep_t", "design": {"goal": "single_outcome", "outcome_type": "continuous", "structure": "independent", "predictors": "one_factor_2_levels"}, "variables": {"outcome": "los_days", "group": "ward"}, "decisions": {}},
+   "accept_tests": ["indep_t", "mann_whitney"],
+   "rubric": ["Independent groups, not paired", "Skew: either run indep_t and act on the normality check, or choose mann_whitney as the documented fallback with a reason", "Do not treat the outcome as ordinal in the design"]},
+
+  {"id": "responders_labels", "difficulty": 1,
+   "description": "In a two-arm trial, each patient was classified at week 12 as a responder or not. I want to know whether the response rate differs between the drug and placebo arms. The file has one row per patient with columns arm (drug/placebo) and responder (yes/no), plus age.",
+   "expected_spec": {"test": "two_by_two", "design": {"goal": "single_outcome", "outcome_type": "binary", "structure": "independent", "predictors": "one_factor_2_levels"}, "variables": {"row": "arm", "col": "responder"}, "decisions": {}},
+   "accept_variables_swapped": [["row", "col"]],
+   "rubric": ["Binary outcome, two independent groups", "Labelled columns are fine for a contingency table; no recoding needed", "Report the risk difference or odds ratio with its CI"]},
+
+  {"id": "visits_complete_arm_by_time", "difficulty": 3,
+   "description": "A randomized drug/placebo trial measured systolic blood pressure at baseline and weeks 4, 8 and 12. Every patient completed every visit; there are no missing values. The file is long format with columns id, arm, week, sbp. The question is whether the change in blood pressure over the 12 weeks differs between the two arms.",
+   "expected_spec": {"test": "lmm", "design": {"goal": "single_outcome", "outcome_type": "continuous", "structure": "repeated_or_clustered", "repeated_pattern": "unbalanced_or_nested"}, "variables": {"outcome": "sbp", "subject": "id"}, "decisions": {}},
+   "accept_tests": ["lmm", "gee_cont"],
+   "accept_design_alternatives": [{"goal": "single_outcome", "outcome_type": "continuous", "structure": "repeated_or_clustered", "repeated_pattern": "population_averaged"}],
+   "accept_formula": "arm.*[*:].*week|week.*[*:].*arm",
+   "require_formula_or_within": true,
+   "ask": ["re_formula", "reml", "working_correlation"],
+   "rubric": ["Complete visits do not make this a one-factor repeated-measures ANOVA: the arm-by-week interaction is the question", "Random effects / REML (or the working correlation) are the researcher's decisions; ask, do not invent", "Do not run a pooled paired test"]},
+
+  {"id": "relapse_with_death", "difficulty": 3,
+   "description": "We followed 300 patients after remission. For each patient we have months of follow-up and a status code: 0 = still in remission at last contact, 1 = relapsed, 2 = died without relapse. Columns: id, months, status. The clinical question is: what is the probability that a patient has relapsed within 24 months? Deaths obviously prevent relapse.",
+   "expected_spec": {"test": "competing", "design": {"goal": "single_outcome", "outcome_type": "time_to_event", "survival_aim": "competing_events"}, "variables": {"time": "months", "event": "status"}, "decisions": {"estimand": "cumulative_incidence", "event_of_interest": 1}},
+   "accept_ask": true,
+   "rubric": ["Deaths are competing events, not censoring: Kaplan-Meier with deaths censored overstates the relapse probability", "The question is a probability, so the estimand is cumulative incidence, not the cause-specific hazard", "Keep status codes 0/1/2 as they are; event_of_interest = 1"]},
+
+  {"id": "lmm_no_decisions", "difficulty": 3,
+   "description": "Longitudinal trial, drug versus placebo, systolic blood pressure at baseline and weeks 4, 8 and 12, long format (id, arm, week, sbp). About one visit in eight is missing. Does the rate of change per week differ between arms? Patients are independent.",
+   "expected_spec": {"test": "lmm", "design": {"goal": "single_outcome", "outcome_type": "continuous", "structure": "repeated_or_clustered", "repeated_pattern": "unbalanced_or_nested"}, "variables": {"outcome": "sbp", "subject": "id"}, "decisions": {}},
+   "accept_formula": "arm.*[*:].*week|week.*[*:].*arm",
+   "require_formula_or_within": true,
+   "ask": ["re_formula", "reml"],
+   "rubric": ["Missing visits rule out complete-case repeated-measures ANOVA", "Random-effects structure and REML were not stated: ask before running", "Keep the arm-by-week interaction"]},
+
+  {"id": "non_inferiority", "difficulty": 2,
+   "description": "We ran a non-inferiority trial of a generic antihypertensive against the branded drug. The primary endpoint is systolic blood pressure at week 8, one measurement per patient, columns arm and sbp_week8. The pre-specified non-inferiority margin is 5 mmHg. Can you run the analysis?",
+   "expected_spec": {"test": null, "design": null, "variables": {}, "decisions": {}},
+   "expect_no_run": true,
+   "must_mention": ["non-inferiority", "margin"],
+   "rubric": ["The taxonomy has no non-inferiority leaf; say so and do not force a two-sided two-sample test as if it answered the question", "Explain what is missing (a one-sided CI against the margin) and hand the choice back"]},
+
+  {"id": "kappa_labels", "difficulty": 1,
+   "description": "Two radiologists independently classified the same 80 scans as normal, benign or malignant. How well do they agree beyond chance? Wide file: one row per scan, columns scan_id, rater_a, rater_b.",
+   "expected_spec": {"test": "cohen_kappa", "design": {"goal": "agreement_accuracy", "task": "two_raters_categorical"}, "variables": {"columns": ["rater_a", "rater_b"]}, "decisions": {}},
+   "rubric": ["Two raters, nominal categories: Cohen's kappa, unweighted", "Do not pass scan_id as a rating column"]},
+
+  {"id": "diag_labels", "difficulty": 2,
+   "description": "We evaluated a rapid antigen test against PCR as the gold standard in 400 people. Columns: pcr (pos/neg) and rapid (positive/negative), one row per person. I need sensitivity and specificity with confidence intervals.",
+   "expected_spec": {"test": "diag_binary", "design": {"goal": "agreement_accuracy", "task": "binary_test_accuracy"}, "variables": {"outcome": "pcr", "x": "rapid"}, "params": {"positive_label": "pos", "test_positive_label": "positive"}, "decisions": {}},
+   "rubric": ["PCR is the truth (outcome), the rapid test is the prediction (x)", "Both columns are labelled, so both positive labels must be named in params", "Do not recode the data by hand"]}
+]

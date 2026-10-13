@@ -49,6 +49,7 @@ Design work so far happened in a claude.ai chat on 2026-10-12. The interactive t
   - `procedures/` — one module per family (`multivariate.py` holds MANOVA / MANCOVA / multivariate regression). Each procedure is `fn(df, spec) -> TestResult` and must set `checks` and `cross_check`.
   - `cli.py` — `list`, `show`, `resolve`, `ask` (terminal wizard), `tree`, `check`, `run`.
 - `.claude/skills/whichtest/SKILL.md` — the skill (Claude Code project skill; the text is model-agnostic). `reference/questions.md` is generated: `uv run whichtest tree --out .claude/skills/whichtest/reference/questions.md`.
+- `tools/skill_eval.py` — runs the skill through headless Claude Code (`claude -p`, the user's own login, cwd = this directory so the skill loads) on the study descriptions in `tests/fixtures/skill_eval_cases.json` (+ the three round-three cases) with synthetic data, and scores the spec it writes: test, design, variable roles, decisions (asked, not invented), workflow (check + run, or questions) and privacy (no tool call that prints data rows; a sentinel value planted in every dataset must not appear in the output). `--rescore` re-scores saved transcripts without calling the model. Results: `tests/fixtures/skill_eval_latest.json`; harness unit tests in `tests/test_skill_eval_harness.py`.
 - `tests/` — pytest. `test_procedures.py` runs every ready and helper test on one synthetic dataset and asserts the cross-check agrees; `test_judgment.py` checks every judgment test refuses without decisions and runs with them; the exact identities listed under "Verify before trusting" are separate tests.
 - `examples/` — synthetic `trial.csv` and four specs.
 - `.github/workflows/ci.yml` — three jobs: the suite on Python 3.10–3.13 × {highest, lowest-direct} resolutions; a **base-only install** (no `cross` extra) that runs `tests/test_base_install.py` and the CLI; a wheel build installed into a clean venv. `tests/test_base_install.py` also runs in the dev environment by blocking the optional imports, so the "every procedure runs; missing cross-checks are reported as NOT RUN, never silent" contract is checked on every run.
@@ -248,7 +249,25 @@ Done after round two, while round three was pending: the CI matrix, base-only in
 - R3-8 `binom_test` reads a labelled outcome through `data.binary_labels` with `params.positive_label`, like the other binary leaves; the skill's column-binding step lists which tests take `positive_label` and `test_positive_label`.
 - Also from the assessment: `params` reads go through `data.int_param` / `float_param` / `bool_param` (`exact="false"`, `p0="bad"`, `n_boot="many"`, `seed=True` are rejected instead of coerced); the skill gained a "before you stop at a leaf" section for the three routing risks the review named (baseline-adjusted trials are not paired tests, arm-by-time is not one-factor RM-ANOVA, relapse with prior death is competing risks) and a reporting rule for tests without a headline statistic.
 
-Still open: an executed evaluation of the skill itself with a model (the round-three fixtures describe three studies and their target specs; nothing has run them through an LLM yet).
+**2026-10-12, skill evaluation with a model (`tools/skill_eval.py`).** Eleven study descriptions (Astra's three plus eight more: a skewed two-group comparison, a labelled 2×2, the three routing traps from the round-three review, a mixed model with no stated decisions, a non-inferiority trial the taxonomy cannot express, two-rater kappa with labels, a diagnostic test with labelled truth and prediction) were run through headless Claude Code (claude-fable-5-1) with the skill, one session per case, no interactive user. Result: **11/11 pass**, about $1 and 40–60 s per case.
+
+| case | difficulty | test chosen | action | score |
+| --- | ---: | --- | --- | --- |
+| `paired_change` | 1 | paired_t | ran | pass |
+| `adjusted_parallel_trial` | 2 | multiple_reg | ran | pass |
+| `treatment_by_visit` | 3 | lmm | ran | pass |
+| `los_two_wards` | 1 | mann_whitney | ran | pass |
+| `responders_labels` | 1 | two_by_two | ran | pass |
+| `visits_complete_arm_by_time` | 3 | lmm | asked 6 questions | pass |
+| `relapse_with_death` | 3 | competing | ran | pass |
+| `lmm_no_decisions` | 3 | lmm | asked 4 questions | pass |
+| `non_inferiority` | 2 | indep_t | asked 6 questions | pass |
+| `kappa_labels` | 1 | cohen_kappa | ran | pass |
+| `diag_labels` | 2 | diag_binary | ran | pass |
+
+What the transcripts show: every session inspected the data by dtypes, shape, missing counts and category labels only, never a row; every run went through `whichtest check` before `whichtest run`; the two mixed-model cases without stated decisions wrote the spec and asked about `re_formula`/`reml` with a recommendation and trade-off instead of guessing; the complete-visits case kept the arm-by-week interaction (as `C(arm) * C(week)`, asking whether week should be linear); the relapse case chose cumulative incidence with `event_of_interest = 1`, `timepoints = [24]` and `censor_code = 0` from the description; the skewed-stay case took the documented `mann_whitney` fallback with the reason recorded; the non-inferiority case wrote the nearest spec, validated it, did not run it, and asked six questions starting with the margin and direction. Two scorer defects were found and fixed during the run (a formula binds the outcome on its left-hand side; the word "column" in a Python print is not the `column` shell program); the first scoring of three cases failed for those reasons, not because of the skill. Judgement call recorded in the scorer: for a design the taxonomy cannot express, a spec naming the nearest test is acceptable as long as it is not run as if it answered the question.
+
+Still open: the evaluation has one run per case on one model; routing errors are more likely to appear with other models or paraphrased descriptions, so rerun `uv run python tools/skill_eval.py` (optionally `--model sonnet`) after any change to the skill text, and add a case whenever a real study exposes a wrong route.
 
 ## Conventions
 

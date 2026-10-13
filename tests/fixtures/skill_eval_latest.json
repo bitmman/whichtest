@@ -1,0 +1,627 @@
+{
+  "model": "default (claude-fable-5-1 at the time of the recorded run)",
+  "date": "2026-10-12",
+  "n": 11,
+  "passed": 11,
+  "cost_usd": 10.5,
+  "cases": [
+    {
+      "id": "paired_change",
+      "difficulty": 1,
+      "cost_usd": 0.8613147499999999,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "paired_t",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "paired"
+        },
+        "variables": {
+          "before": "sbp_before",
+          "after": "sbp_after"
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because there is one outcome, systolic blood pressure, and the question is whether its within-person change differs from zero",
+          "answered outcome_type=continuous because systolic blood pressure is a continuous measurement",
+          "answered structure=paired because the same 30 adults are measured before and after the programme; each row holds both measurements for one patient",
+          "no predictors question arises: a single cohort with no control arm and no covariates, so the leaf is reached at structure",
+          "ruled out indep_t because the before and after values are not independent groups; they come from the same people",
+          "ruled out multiple_reg / ancova on baseline (the baseline-adjusted-trial risk) because there is only one arm and no between-arm estimand; the researcher's question is the mean within-person change itself",
+          "ruled out rm_anova / lmm because there are only two time points and no grouping factor, so the paired t-test is the exact special case",
+          "wilcoxon_signed is the fallback if the differences are not roughly normal",
+          "columns inspected by header and dtype only (patient int64, sbp_before float64, sbp_after float64; 30 rows, one patient per row); no data rows were read",
+          "pair_alignment: rows are one patient each with both measurements in the same row, so pairs are joined within the row, not across rows; the researcher should confirm this layout"
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "The spec validated and the test ran without flags. Here is the report.\n\n**Test:** Paired t-test (`paired_t`, ready)\n\n**Why:** One continuous outcome, systolic blood pressure, measured twice on the same 30 adults, with no control arm and no covariates. The taxonomy resolves single outcome, continuous, paired straight to the paired t-test. I ruled out the independent-samples t-test because the before and after values come from the same people, and ruled out baseline-adjusted regression and mixed models because there is only one arm and two time points, so the within-person change is exactly the estimand the researcher asked about.\n\n**Result:**\n\n| Quantity | Value |\n| --- | --- |\n| t (df = 29) | -6.47 |\n| p | 4.5 \u00d7 10\u207b\u2077 |\n| Mean change (after minus before) | -5.65 mmHg, 95% CI -7.44 to -3.86 |\n| Effect size d_z | -1.18 |\n\nThe mean within-person change is different from zero. Systolic blood pressure fell by about 5.6 mmHg on average over the four-week programme, and the interval excludes zero by a wide margin. The standardised effect is large.\n\n**Assumptions:**\n- Normality of the paired differences: ok. Shapiro\u2013Wilk W = 0.94, p = 0.10, skew 0.70, n = 30.\n- Pair alignment: to confirm. The pipeline cannot verify from data that both measurements in a row belong to the same patient. The description says one patient per row with both columns, so this holds if the file was built that way.\n\n**Cross-check (scipy one-sample t-test on the differences):** agrees. The t statistic, p-value an"
+    },
+    {
+      "id": "adjusted_parallel_trial",
+      "difficulty": 2,
+      "cost_usd": 1.00465375,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "multiple_reg",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "independent",
+          "predictors": "multiple_mixed"
+        },
+        "variables": {
+          "outcome": "sbp_week12",
+          "predictors": [
+            "arm",
+            "sbp_baseline",
+            "age"
+          ],
+          "categorical": [
+            "arm"
+          ]
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because the question is about one outcome, week-12 systolic blood pressure, not several outcomes, an association or an agreement task",
+          "answered outcome_type=continuous because systolic blood pressure is a continuous measurement (float column)",
+          "answered structure=independent because each patient supplies one analysis row, the trial is individually randomized and there are no site clusters, so rows are neither paired nor clustered",
+          "answered predictors=multiple_mixed because the prespecified model has one categorical predictor (arm) and two continuous covariates (baseline SBP, age); this leaf is the ANCOVA form of multiple linear regression",
+          "model is additive (arm + sbp_baseline + age) with common covariate slopes and no interactions, exactly as prespecified; the pipeline's homogeneous_slopes check tests that assumption rather than adding interaction terms to the model",
+          "ruled out indep_t because it would ignore the prespecified baseline and age adjustment",
+          "ruled out paired_t on week-12 minus baseline because the estimand is the adjusted between-arm difference, not a pooled within-patient change; baseline enters as a covariate, not as a pairing",
+          "ruled out factorial_anova because there is one factor; the other predictors are continuous covariates, not factors",
+          "ruled out lmm and gee_cont because there is no clustering or repeated measurement in the analysis rows",
+          "columns inspected by header, dtype, shape and arm counts only; no rows were read: 200 rows, arm is a two-level string column (control, drug; 100 each), the other three columns are float with no missing values",
+          "arm is declared categorical so the pipeline codes it with a treatment contrast; the arm coefficient is the adjusted between-arm difference, which is the quantity of interest rather than the model F"
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "The design resolved cleanly to a ready test, the spec validated, and the run completed without any flag. Files written under `.skill_eval/adjusted_parallel_trial/`: `spec.json` and `result.json`. Nothing in the project was modified, and the data file was inspected by column name, dtype, shape and arm counts only.\n\n**Test:** Multiple linear regression / ANCOVA (`multiple_reg`, ready)\n\n**Why:** One continuous outcome, one row per patient with no pairing or clustering, and a prespecified additive model with a two-level treatment factor plus two continuous covariates. This is the ANCOVA leaf of the taxonomy. An unadjusted t-test and a paired test on change scores were ruled out because the estimand is the covariate-adjusted between-arm difference, and mixed or GEE models were ruled out because nothing is clustered.\n\n**Model fitted:** week-12 SBP on arm, baseline SBP and age, additive, common slopes, as prespecified.\n\n**Result:** The question is answered by the arm coefficient, not the model F, so that is the headline.\n\n| Quantity | Estimate | 95% CI | p |\n| --- | --- | --- | --- |\n| Drug vs control, adjusted difference in week-12 SBP (mmHg) | -5.73 | -7.11 to -4.35 | 3.2e-14 |\n| Baseline SBP slope | 0.668 | 0.602 to 0.734 | 6.2e-49 |\n| Age slope | 0.196 | 0.113 to 0.279 | 5.8e-6 |\n| Model F (3, 196) | 159.8 | | 2.1e-52 |\n| Adjusted R\u00b2 | 0.705 | | |\n| Partial \u03b7\u00b2 for arm | 0.255 | | |\n\nWeek-12 systolic blood pressure is lower in the drug arm by about 5.7 mmHg after adjusting for ba"
+    },
+    {
+      "id": "treatment_by_visit",
+      "difficulty": 3,
+      "cost_usd": 1.02024875,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "lmm",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "repeated_or_clustered",
+          "repeated_pattern": "unbalanced_or_nested"
+        },
+        "variables": {
+          "formula": "sbp ~ C(arm, Treatment('placebo')) * week",
+          "subject": "id"
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {
+          "re_formula": "~week",
+          "reml": true
+        },
+        "reasoning": [
+          "answered goal=single_outcome because there is one outcome, systolic blood pressure.",
+          "answered outcome_type=continuous because sbp is a continuous measurement (float column).",
+          "answered structure=repeated_or_clustered because each patient is measured at up to four visits (baseline, weeks 4, 8, 12); patients are independent of one another, so the only clustering is within patient.",
+          "answered repeated_pattern=unbalanced_or_nested because some visits are missing, so the data are unbalanced; the taxonomy routes this to the linear mixed model.",
+          "the question is whether the linear change per week differs between arms, so the fixed effects are arm, week (numeric, linear) and the arm-by-week interaction; the interaction coefficient is the answer, not the model's omnibus statistic.",
+          "placebo is the reference level of arm, so the interaction coefficient is the extra change per week in the drug arm relative to placebo.",
+          "ruled out rm_anova (one-factor repeated measures) because the arm-by-week term is the question, and missing visits would drop whole patients from a complete-case repeated-measures ANOVA.",
+          "ruled out gee_cont because the researcher prespecified a subject-specific (conditional) target; the population-averaged GEE is kept only as the pipeline's cross-check and fallback, not as the analysis.",
+          "ruled out paired_t / ancova on baseline and week 12 because the question is about the slope over all four visits, not a single follow-up difference.",
+          "decisions were stated by the researcher: random intercept and random week slope per patient (re_formula '~week'; statsmodels estimates the intercept-slope covariance, so the two random effects are correlated), fitted by REML (reml true), interaction kept.",
+          "columns inspected by header and dtype only: id (int), week (int: 0, 4, 8, 12), arm (str: drug, placebo), sbp (float); 254 rows from 70 patients, no missing values inside the rows that are present (missing visits are absent rows)."
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "The spec validated, the model ran, and the result is not flagged. Files written under `.skill_eval/treatment_by_visit/`: `spec.json`, `result.json`.\n\n**Test:** Linear mixed model (`lmm`, judgment status)\n\n**Why:** One continuous outcome measured at up to four visits per patient with missing visits, so the taxonomy path is single outcome \u2192 continuous \u2192 repeated or clustered \u2192 unbalanced, which leads to the mixed model. The question is the arm-by-week slope difference, so the fixed effects are arm, week as a linear term, and their interaction, with placebo as the reference arm. The researcher's prespecified subject-specific target was kept. Ruled out: one-factor repeated-measures ANOVA (the arm-by-time term is the question, and missing visits would drop patients), a population-averaged GEE as the analysis (it is used only as the cross-check), and a baseline-to-week-12 paired or ANCOVA comparison (the question is about the slope over all visits). Columns were inspected by header and dtype only.\n\n**Result:** the model has no headline omnibus statistic; the answer is the arm-by-week interaction coefficient.\n\n| Fixed effect | Estimate | 95% CI | p |\n| --- | --- | --- | --- |\n| Drug \u00d7 week (the question) | \u22120.358 mmHg/week | \u22120.544 to \u22120.171 | 0.00017 |\n| Week (placebo slope) | \u22120.142 mmHg/week | \u22120.275 to \u22120.008 | 0.037 |\n| Drug vs placebo at baseline | \u22121.00 mmHg | \u22123.62 to 1.61 | 0.45 |\n| Intercept (placebo, week 0) | 139.5 mmHg | 137.6 to 141.3 | |\n\nSystolic blood pressure falls"
+    },
+    {
+      "id": "los_two_wards",
+      "difficulty": 1,
+      "cost_usd": 0.8796904999999999,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "mann_whitney",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "independent",
+          "predictors": "one_factor_2_levels"
+        },
+        "variables": {
+          "outcome": "los_days",
+          "group": "ward"
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because one outcome (length of stay) is compared between groups",
+          "answered outcome_type=continuous because length of stay is measured in days",
+          "answered structure=independent because each patient appears once and ward A and ward B patients are different people with no matching",
+          "answered predictors=one_factor_2_levels because the only predictor is ward, with two levels (A, B) and no covariates",
+          "the design resolves to indep_t (Welch); chose its taxonomy fallback mann_whitney because the researcher reports a strongly right-skewed outcome with a few very long stays and asks whether the typical stay differs, a question about the distribution's location rather than its mean, which the t-test's normality check would be expected to fail",
+          "ruled out indep_t as the primary because the mean is dominated by the few very long stays and is not the 'typical' stay the researcher asks about; the Welch result can still be run as a sensitivity analysis if the researcher wants a difference in mean days",
+          "ruled out paired_t / wilcoxon because there is no pairing: patients are not measured twice and not matched across wards",
+          "ruled out multiple_reg / ancova because no covariates were described",
+          "columns inspected by header, dtype and group counts only: patient_id (int64), ward (str, two levels, 80 each), los_days (float64); 160 rows, no missing values, no duplicate patient_id"
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "**Test:** Mann\u2013Whitney U test (`mann_whitney`, ready)\n\n**Why:** One continuous outcome (length of stay in days) compared between two independent groups, each patient once, no covariates. The taxonomy resolves this design to Welch's t-test, but you describe a strongly right-skewed outcome with a few very long stays and ask about the *typical* stay, so I used the taxonomy's own fallback for that test, Mann\u2013Whitney, which does not depend on the mean being a sensible summary. Paired tests were ruled out because there is no matching between wards, and regression or ANCOVA because no covariates were described. Columns were inspected by name, type and group counts only.\n\n**Result**\n\n| Quantity | Value |\n| --- | --- |\n| n (ward A / ward B) | 80 / 80 |\n| U | 3632.5 |\n| p (two-sided) | 0.140 |\n| median stay, ward A | 4.70 days |\n| median stay, ward B | 3.95 days |\n| rank-biserial r | 0.135 (positive = ward A longer) |\n| common-language effect size, P(A stay > B stay) | 0.568 |\n\nInterpretation: there is no evidence at the 5% level that the typical stay differs between the wards. The effect is small: a randomly chosen ward A patient has about a 57% chance of staying longer than a ward B patient, against 50% under no difference.\n\n**Assumptions:** The shape-similarity check passed (SD ratio A/B 1.68, skew 1.91 vs 1.22), so the result can be read as a comparison of typical stays rather than only stochastic dominance. Independence of patients is a design property you stated (each patient app"
+    },
+    {
+      "id": "responders_labels",
+      "difficulty": 1,
+      "cost_usd": 1.0097289999999999,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "two_by_two",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "binary",
+          "structure": "independent",
+          "predictors": "one_factor_2_levels"
+        },
+        "variables": {
+          "row": "arm",
+          "col": "responder"
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because the question is whether one outcome (response at week 12) differs between arms",
+          "answered outcome_type=binary because each patient is classified as responder or not (yes/no)",
+          "answered structure=independent because each patient is in one arm and contributes one row; no pairing or clustering was described",
+          "answered predictors=one_factor_2_levels because the only factor is arm with two levels (drug/placebo) and no adjustment was requested",
+          "ruled out logistic because the researcher asked for an unadjusted comparison of response rates; age is in the file but was not requested as a covariate (logistic regression with age would be the adjusted alternative)",
+          "ruled out mcnemar because the two arms are different patients, not the same patients classified twice",
+          "ruled out chi_sq_indep because the table is 2x2, which two_by_two handles with Fisher's exact as the automatic fallback for sparse cells",
+          "two-sided alternative because the question is whether the rates differ, with no direction stated",
+          "columns inspected by header, dtype and category levels only (arm: drug/placebo; responder: no/yes; age numeric); no rows were read",
+          "variables.row=arm and variables.col=responder; the pipeline crosstabs levels in sorted order (rows drug, placebo; columns no, yes), so its risk estimates are oriented to row 1 = drug and column 1 = no"
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "Validation passed, the test ran, and the result is not flagged. Files written under `.skill_eval/responders_labels/`: `spec.json` and `result.json`.\n\n**Test:** Chi-square or Fisher's exact (2\u00d72) (`two_by_two`, ready)\n\n**Why:** One binary outcome (responder yes/no) compared between two independent groups (drug vs placebo), one row per patient, no adjustment requested. Ruled out McNemar (the arms are different patients, not the same patients twice) and logistic regression (age is in the file, but you asked for the unadjusted rate comparison; logistic with age would be the adjusted version if you want it).\n\n**Result:** the response rate differs between arms.\n\n| Quantity | Value |\n| --- | --- |\n| Pearson \u03c7\u00b2 (df = 1) | 19.48 |\n| p | 1.0 \u00d7 10\u207b\u2075 |\n| Response rate, drug | 52 / 97 |\n| Response rate, placebo | 24 / 103 |\n| Cram\u00e9r's V | 0.31 |\n\nThe pipeline tabulates levels alphabetically, so its estimates are oriented to row drug and column \"no\", i.e. they describe non-response in the drug arm relative to placebo. Reading them for response, drug relative to placebo:\n\n| Estimate | Pipeline output (non-response) | For response (same numbers, reoriented) |\n| --- | --- | --- |\n| Risk difference | \u22120.303 [\u22120.432, \u22120.175] | +0.303 [0.175, 0.432] (Wald) |\n| Odds ratio | 0.263 [0.143, 0.482] | 3.80 [2.07, 6.98] (reciprocal) |\n| Risk ratio | 0.605 [0.476, 0.768] | not reported: a risk ratio for non-response does not convert to one for response |\n\nSo the drug arm's response rate is about 30 perc"
+    },
+    {
+      "id": "visits_complete_arm_by_time",
+      "difficulty": 3,
+      "cost_usd": 1.11528625,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": true,
+      "ran_check": true,
+      "ran_run": false,
+      "result_written": false,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "lmm",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "repeated_or_clustered",
+          "repeated_pattern": "unbalanced_or_nested"
+        },
+        "variables": {
+          "formula": "sbp ~ C(arm) * C(week)",
+          "subject": "id",
+          "outcome": "sbp",
+          "categorical": [
+            "arm",
+            "week"
+          ]
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because there is one outcome, systolic blood pressure",
+          "answered outcome_type=continuous because sbp is a float measurement (mmHg)",
+          "answered structure=repeated_or_clustered because each patient contributes four visits (baseline, weeks 4, 8, 12)",
+          "answered repeated_pattern=unbalanced_or_nested because the design has a between-subject factor (arm) on top of the within-subject factor (week); the question is the arm-by-time interaction, which the one-factor repeated-measures ANOVA leaf cannot hold",
+          "ruled out rm_anova because it has one within-subject factor only; it would answer whether blood pressure changes over time pooled across arms, not whether the change differs between arms",
+          "ruled out paired_t / ancova on baseline-adjusted week-12 values because the researcher asked about the change over the whole 12 weeks, which uses all four visits; a baseline-adjusted ANCOVA at week 12 is a legitimate alternative estimand and is offered as a question",
+          "ruled out gee_cont as the primary because the skill's default for arm-by-time with complete data is the mixed model; a population-averaged GEE is the taxonomy fallback if the random-effects structure does not converge, and is offered as a question",
+          "formula keeps the arm-by-time interaction C(arm) * C(week) because that term is the question; week is coded categorically so no linear trend is assumed over baseline and three follow-ups (a linear-time coding is offered as a question)",
+          "decisions left empty on purpose: re_formula and reml are the researcher's modeling choices (listed in questions.json); the pipeline refuses to run without them",
+          "columns inspected by header, dtype and counts only: id int64, arm str, week int64, sbp float64; 280 rows, 70 subjects, 2 arms, visits 0/4/8/12, 4 visits per subject, no missing values; no raw rows were read"
+        ]
+      },
+      "questions": [
+        "Random-effects structure (decision `re_formula`): should the model have a random intercept per patient only (\"1\"), or a random intercept and a random slope on week (\"~week\")? Recommendation: start with \"1\" (random intercept). A random slope lets each patient have their own trajectory and is more realistic when patients' blood pressure trends differ, but with 70 patients and 4 visits it can fail to converge, in which case the pipeline suggests a population-averaged GEE.",
+        "Estimation method (decision `reml`): restricted maximum likelihood (true) or full maximum likelihood (false)? Recommendation: true. REML gives unbiased variance components and is the usual choice for reporting a single model; choose false only if you plan to compare models with different fixed effects by likelihood ratio.",
+        "Time coding: the spec treats week as a categorical factor (baseline, 4, 8, 12), so the arm-by-week interaction is a set of three contrasts versus baseline and no straight-line trend is assumed. Do you prefer that, or week as a linear term (formula `sbp ~ C(arm) * week`) so the answer is a single arm difference in slope (mmHg per week)? Recommendation: categorical, unless a linear trend is expected on clinical grounds.",
+        "Estimand: is the target the subject-specific effect of a linear mixed model (the default here), or a population-averaged effect via GEE (`gee_cont`, with a working correlation decision instead of random effects)? Recommendation: mixed model; the pipeline cross-checks its fixed effects against an exchangeable GEE anyway.",
+        "Alternative analysis to confirm it is not wanted: a baseline-adjusted ANCOVA of week-12 blood pressure on arm with the baseline value as a covariate answers 'what is the between-arm difference at week 12', using only two of the four visits. The mixed model with the arm-by-week interaction is the analysis of 'does the change over 12 weeks differ between arms'. Confirm the latter is the question.",
+        "Confirm the design properties the pipeline cannot check: patients were randomized individually (no site or cluster nesting beyond patient), and the baseline measurement was taken before treatment started."
+      ],
+      "final_excerpt": "The test was not run. The chosen test is a judgment test whose modeling decisions the researcher must make, so the spec is written without them and the questions are below.\n\n**Test:** Linear mixed model (`lmm`, judgment). Formula keeps the arm-by-week interaction, with a random effect per patient.\n\n**Why:** Four visits per patient in two randomized arms is the \"several visits in two arms\" case: the question is the arm-by-time interaction, which a one-factor repeated-measures ANOVA cannot hold, so the taxonomy routes to the mixed model under the between-subject-factor pattern. Complete data does not change that. Ruled out: repeated-measures ANOVA, which answers whether blood pressure changes over time pooled across arms; and a baseline-adjusted ANCOVA at week 12, which answers a different question and uses only two of the four visits.\n\n**Columns:** inspected by header, dtype and counts only, never by row. id (int), arm (string), week (int), sbp (float). 70 patients, 2 arms, visits at weeks 0, 4, 8 and 12, 4 visits each, no missing values.\n\n**Files written** under `.skill_eval/visits_complete_arm_by_time/`:\n- `spec.json` with design, variables, reasoning, and empty decisions.\n- `questions.json` with the questions below.\n\n`whichtest check` on the spec reports INVALID solely because the two decisions are missing. A throwaway copy with placeholder decisions passed the check and was deleted, so the rest of the spec is valid. Nothing in the project was modified.\n\n**Questions for the"
+    },
+    {
+      "id": "relapse_with_death",
+      "difficulty": 3,
+      "cost_usd": 0.9675612500000002,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "competing",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "time_to_event",
+          "structure": "independent",
+          "survival_aim": "competing_events"
+        },
+        "variables": {
+          "time": "months",
+          "event": "status"
+        },
+        "params": {
+          "timepoints": [
+            24
+          ],
+          "censor_code": 0
+        },
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {
+          "estimand": "cumulative_incidence",
+          "event_of_interest": 1
+        },
+        "reasoning": [
+          "answered goal=single_outcome because one outcome per patient (time to relapse) is analysed",
+          "answered outcome_type=time_to_event because each patient has months of follow-up and a status at last contact, with censoring (status 0)",
+          "answered structure=independent because each of the 300 patients contributes one row and nothing indicates pairing or clustering",
+          "answered survival_aim=competing_events because death without relapse (status 2) ends follow-up and makes relapse impossible; the researcher says deaths prevent relapse",
+          "decision estimand=cumulative_incidence: the researcher's question is the probability of relapse within 24 months, a prognostic quantity; the Aalen-Johansen estimator answers it directly",
+          "decision event_of_interest=1: the researcher's code book says 1 = relapsed; 2 = died without relapse is the competing event; 0 = still in remission is censored",
+          "ruled out km_logrank on relapse with deaths censored: one minus Kaplan-Meier treats dead patients as if they could still relapse and overstates the probability; there are also no groups to compare",
+          "ruled out cause_specific_hazard: a Cox model on the relapse hazard is the etiological choice; the question here is prognostic (absolute probability by 24 months)",
+          "params.timepoints=[24] because the clinical question names 24 months",
+          "columns inspected by header, dtype and status counts only; no data rows were read"
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "Validation passed and the run completed without a flag. Here is the report.\n\n**Test:** Competing risks analysis (`competing`, judgment status), with the cumulative incidence estimand (Aalen\u2013Johansen estimator).\n\n**Why:** Each patient contributes one follow-up time and one terminal status, so this is a single time-to-event outcome in independent subjects. Death without relapse ends follow-up and makes relapse impossible, so it is a competing event rather than censoring. Your question asks for the absolute probability of relapse by 24 months, which is a prognostic quantity, so cumulative incidence was chosen over cause-specific hazards. Relapse (code 1) is the event of interest, death (code 2) the competing event, and 0 is censored. One minus Kaplan\u2013Meier on relapse with deaths censored was ruled out because it treats dead patients as if they could still relapse and overstates the probability. Columns were inspected by name, type and status counts only.\n\n**Result:** This analysis has no headline test statistic or p-value. The answer is the estimate itself.\n\n| Quantity | Estimate | 95% CI |\n| --- | --- | --- |\n| Cumulative incidence of relapse at 24 months | 0.403 | 0.348 to 0.458 |\n| Cumulative incidence of relapse at end of follow-up | 0.473 | not reported |\n| 1 \u2212 Kaplan\u2013Meier (naive, deaths censored) at end of follow-up | 0.546 | not reported |\n\nSample: 300 patients, 143 relapses, 57 deaths without relapse, 100 still in remission at last contact.\n\nSo about 40% of patients are"
+    },
+    {
+      "id": "lmm_no_decisions",
+      "difficulty": 3,
+      "cost_usd": 0.962402,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": true,
+      "ran_check": true,
+      "ran_run": false,
+      "result_written": false,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "lmm",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "repeated_or_clustered",
+          "repeated_pattern": "unbalanced_or_nested"
+        },
+        "variables": {
+          "formula": "sbp ~ week * arm",
+          "subject": "id"
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because there is one outcome, systolic blood pressure.",
+          "answered outcome_type=continuous because sbp is a continuous measurement (float column).",
+          "answered structure=repeated_or_clustered because each patient is measured at up to four visits (baseline, weeks 4, 8, 12); patients themselves are independent, so the only clustering is visits within patient.",
+          "answered repeated_pattern=unbalanced_or_nested because about one visit in eight is missing (247 rows for 70 patients, not 280) and there is a between-subject factor (arm); the question is the arm-by-time interaction, so this is not a one-factor repeated-measures ANOVA.",
+          "ruled out rm_anova because it needs every subject complete and has no arm-by-time term for the rate-of-change question.",
+          "ruled out gee_cont as the primary because the researcher asks about the rate of change per patient over time, a subject-specific slope question; GEE gives population-averaged effects. It remains the taxonomy's fallback and the cross-check.",
+          "ruled out paired_t / baseline-adjusted regression because the question is the slope difference across four visits, not a single adjusted follow-up difference.",
+          "formula sbp ~ week * arm: week is kept numeric (0, 4, 8, 12) so the week:arm interaction coefficient is the difference in mmHg change per week between arms, which is the researcher's question. That coefficient, with its CI and p, is the answer, not the model's omnibus statistic.",
+          "decisions re_formula and reml are deliberately left empty: the random-effects structure and REML vs ML are the researcher's modelling choices (see questions.json); the pipeline refuses to run until they are given.",
+          "columns inspected by header, dtype and summary counts only (id int, week int, arm str with levels drug/placebo, sbp float; 70 patients, 247 rows, no missing cells; missing visits are absent rows)."
+        ]
+      },
+      "questions": [
+        "Random-effects structure (decision re_formula). Should each patient get a random intercept only (\"1\"), or a random intercept and a random slope on week (\"~week\")? Recommendation: \"~week\", because your question is about per-patient rates of change, and letting slopes vary between patients gives honest standard errors for the week-by-arm difference. Trade-off: with 70 patients and up to 4 visits each, a random slope may converge on the boundary (slope variance near zero); if the convergence check fails we would drop back to \"1\" or to the GEE fallback and tell you.",
+        "Estimation method (decision reml). Restricted maximum likelihood (true) or full maximum likelihood (false)? Recommendation: true, because you want unbiased variance components and a single pre-specified model, not likelihood comparisons between different fixed-effect structures. Choose false only if you plan to compare models with different fixed effects by likelihood ratio.",
+        "Please confirm the coding of time: week will be entered as a numeric variable (0, 4, 8, 12), so the week:arm coefficient is the between-arm difference in mmHg change per week. If you would rather treat visits as categories (separate arm effect at each visit), say so and the formula changes to sbp ~ C(week) * arm.",
+        "Please confirm that missing visits are plausibly missing at random given arm and the patient's earlier values (for example, not mainly dropouts caused by high blood pressure). The mixed model handles missing visits under that assumption; if dropout depends on the unobserved value, a sensitivity analysis would be needed."
+      ],
+      "final_excerpt": "The pipeline confirms the spec is otherwise complete: the only thing blocking it is the two judgment decisions. I did not run the test.\n\n**Test chosen:** Linear mixed model (`lmm`, judgment status), reached by goal = single outcome, continuous outcome, repeated or clustered structure, unbalanced pattern. The spec is at `.skill_eval/lmm_no_decisions/spec.json` with the formula `sbp ~ week * arm` and `id` as the subject. The answer to your question will be the week-by-arm interaction coefficient, the between-arm difference in mmHg change per week, with its CI and p-value.\n\n**Why this and not the neighbours:**\n- Repeated-measures ANOVA needs complete data and has no arm-by-time term for a rate-of-change question.\n- GEE gives population-averaged effects, while you ask about per-patient rates of change. It stays as the fallback and the cross-check.\n- A paired or baseline-adjusted test answers a single follow-up difference, not a slope difference over four visits.\n\nColumns were inspected by header, type and summary counts only: 70 patients, 247 rows, two arms, four weeks, no missing cells.\n\n**Questions for the researcher** (also written to `.skill_eval/lmm_no_decisions/questions.json`):\n\n1. **Random-effects structure.** Random intercept only, or random intercept plus a random slope on week? I recommend the random slope, since your question is about per-patient rates of change. With 70 patients the slope variance may land on the boundary; if the convergence check fails we would simp"
+    },
+    {
+      "id": "non_inferiority",
+      "difficulty": 2,
+      "cost_usd": 1.0100434999999999,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": true,
+      "ran_check": true,
+      "ran_run": false,
+      "result_written": false,
+      "test_ok": true,
+      "mention_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "indep_t",
+        "design": {
+          "goal": "single_outcome",
+          "outcome_type": "continuous",
+          "structure": "independent",
+          "predictors": "one_factor_2_levels"
+        },
+        "variables": {
+          "outcome": "sbp_week8",
+          "group": "arm"
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=single_outcome because the primary endpoint is one outcome, systolic blood pressure at week 8",
+          "answered outcome_type=continuous because sbp_week8 is a float64 blood pressure measurement in mmHg",
+          "answered structure=independent because there is one measurement per patient and the two arms are different patients",
+          "answered predictors=one_factor_2_levels because the only predictor is arm with two levels (generic, branded; 90 patients each, no missing outcome)",
+          "ruled out paired_t because the arms are different patients, not the same patients measured twice",
+          "ruled out ancova / multiple_reg because no baseline value or covariate is in the file and none was pre-specified in the description",
+          "NOT RUN: the study is a non-inferiority trial with a pre-specified margin of 5 mmHg; the taxonomy's indep_t tests H0: mean difference = 0 and takes no margin, so its p-value does not answer the non-inferiority question. The confidence interval for the mean difference that indep_t reports could be compared with the margin, but how to do that (direction, one-sided level, analysis population) is the researcher's decision; see questions.json",
+          "columns inspected by header, dtype, row count and group counts only; no observation was read"
+        ]
+      },
+      "questions": [
+        "The pipeline has no non-inferiority procedure. The test the taxonomy resolves to (Welch's independent-samples t-test, indep_t) tests H0: mean difference = 0 and does not take a margin, so its p-value does not answer whether the generic drug is non-inferior within 5 mmHg. The usual non-inferiority analysis compares the confidence interval of the mean difference with the margin (equivalently, a one-sided t-test of H0: difference >= margin). Do you want (a) the two-sided 95% CI of the mean difference from indep_t, with the non-inferiority conclusion drawn by comparing its bound to the 5 mmHg margin outside the pipeline, or (b) a shifted-null one-sided test added to the pipeline before any result is reported?",
+        "Direction of the margin: for systolic blood pressure lower is better, so I read 'non-inferior within 5 mmHg' as 'mean SBP on generic is not more than 5 mmHg higher than on branded', i.e. the upper confidence bound of (generic minus branded) must lie below +5 mmHg. Is that the pre-specified direction, and which arm is the reference?",
+        "Which significance level was pre-specified for the non-inferiority test: one-sided alpha = 0.025 (equivalent to the two-sided 95% CI) or something else? The confidence level of the interval has to match it.",
+        "Analysis population: non-inferiority trials are normally reported on both the per-protocol and the intention-to-treat populations, because ITT alone tends to favour non-inferiority. The file has 180 patients (90 per arm) with no missing week-8 value. Is this the per-protocol set, the ITT set, or both, and is there a second population to analyse?",
+        "Was any covariate adjustment pre-specified (for example baseline SBP in an ANCOVA)? The file contains only arm and sbp_week8, so the analysis would be unadjusted unless you supply the baseline column.",
+        "Please confirm the design property the pipeline cannot check: one measurement per patient, patients in the two arms are different people with no matching or clustering (for example by site)."
+      ],
+      "final_excerpt": "The spec validates and the project tree is unchanged (the pre-existing modifications were there before I started). The analysis was not run. Here are the questions for the researcher.\n\n**The taxonomy does not fit this study as stated.** The design itself is clear: one continuous outcome, two independent arms, 90 patients each with no missing week-8 value, resolved to Welch's independent-samples t-test. But that test checks whether the mean difference is zero. A non-inferiority trial asks whether the generic arm's mean SBP is within 5 mmHg of the branded arm's, and the pipeline has no procedure that takes a margin. Its p-value would answer the wrong hypothesis, so I did not force the test. The spec with everything known is in the evaluation folder, and so are the questions.\n\nQuestions for the researcher:\n\n1. **How to handle the margin.** Option (a): run the t-test for its two-sided 95% CI of the mean difference and compare the bound to 5 mmHg outside the pipeline. Option (b): add a shifted-null one-sided test to the pipeline first. I recommend (a) as the standard confidence-interval approach, provided the one-sided level in question 3 is 0.025.\n2. **Direction of the margin.** Lower SBP is better, so I read non-inferiority as the upper bound of generic minus branded lying below +5 mmHg. Confirm the direction and which arm is the reference.\n3. **Pre-specified one-sided alpha.** The confidence level must match it. One-sided 0.025 corresponds to the two-sided 95% interval.\n4. **An"
+    },
+    {
+      "id": "kappa_labels",
+      "difficulty": 1,
+      "cost_usd": 0.81289625,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "cohen_kappa",
+        "design": {
+          "goal": "agreement_accuracy",
+          "task": "two_raters_categorical"
+        },
+        "variables": {
+          "columns": [
+            "rater_a",
+            "rater_b"
+          ]
+        },
+        "params": {},
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=agreement_accuracy because the question is how well two raters agree beyond chance, not a group comparison or an association.",
+          "answered task=two_raters_categorical because exactly two radiologists assigned each scan one of three categories (normal, benign, malignant); the researcher describes them as classes, so the ratings are treated as nominal and kappa is unweighted.",
+          "ruled out fleiss_kappa because there are two raters, not three or more.",
+          "ruled out icc because the ratings are categories, not continuous measurements.",
+          "ruled out diag_binary / roc_auc because neither rater is a gold standard; the question is inter-rater agreement, not accuracy.",
+          "weighted kappa was not chosen because the researcher did not state that the categories are ordered; it remains an option if normal < benign < malignant is meant as a severity scale.",
+          "columns inspected by header, dtype and distinct level set only: rater_a and rater_b are string columns with the same three levels and no missing values; scan_id is the item identifier; an extra column age is present but not used (80 rows)."
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "The result is not flagged, so the report follows.\n\n**Test:** Cohen's kappa (`cohen_kappa`, ready)\n\n**Why:** Two radiologists each assigned every one of the same 80 scans to one of three categories, and the question is agreement beyond chance, so the goal is agreement and the task is two raters with categorical ratings. Fleiss' kappa needs three or more raters, the ICC is for continuous ratings, and the accuracy tests need a gold standard, which neither radiologist is here.\n\n**Result:**\n\n| Quantity | Value |\n| --- | --- |\n| \u03ba (unweighted) | 0.842, 95% CI 0.738 to 0.946 |\n| Raw percent agreement | 90% (72 of 80 scans) |\n| z test of \u03ba = 0 | 10.52, p < 0.0001 |\n\nAgreement is substantial to almost perfect by the usual Landis and Koch bands, and the confidence interval stays above 0.7. The eight disagreements all involve one rater calling a scan normal when the other called it benign or malignant, or the reverse. There were no benign versus malignant disagreements.\n\n**Assumptions:** both ok. Both raters used the same three categories. No category dominates, since the most common category for rater A covers about half the scans, so kappa is not depressed by skewed prevalence.\n\n**Cross-check (scikit-learn `cohen_kappa_score`):** agrees. Both libraries give the same point estimate to within tolerance. statsmodels adds the standard error and interval.\n\n**Caveats:**\n\n- The categories were treated as nominal, so kappa is unweighted. If the researcher regards normal, benign, malignant as "
+    },
+    {
+      "id": "diag_labels",
+      "difficulty": 2,
+      "cost_usd": 0.8527685,
+      "seconds": 0.0,
+      "notes": [],
+      "privacy_ok": true,
+      "privacy_problems": [],
+      "spec_written": true,
+      "questions_written": false,
+      "ran_check": true,
+      "ran_run": true,
+      "result_written": true,
+      "test_ok": true,
+      "design_ok": true,
+      "variables_ok": true,
+      "params_ok": true,
+      "decisions_ok": true,
+      "workflow_ok": true,
+      "pass": true,
+      "spec": {
+        "test": "diag_binary",
+        "design": {
+          "goal": "agreement_accuracy",
+          "task": "binary_test_accuracy"
+        },
+        "variables": {
+          "outcome": "pcr",
+          "x": "rapid"
+        },
+        "params": {
+          "positive_label": "pos",
+          "test_positive_label": "positive"
+        },
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "ci_level": 0.95,
+        "decisions": {},
+        "reasoning": [
+          "answered goal=agreement_accuracy because the question is how well a rapid antigen test agrees with a gold standard (PCR), not a group comparison or an association.",
+          "answered task=binary_test_accuracy because both the index test (rapid) and the reference standard (pcr) are binary labels and the researcher asks for sensitivity and specificity with confidence intervals.",
+          "ruled out two_raters_categorical (Cohen's kappa) because PCR is a gold standard, not a second rater of equal standing; kappa measures agreement, not accuracy against truth.",
+          "ruled out score_accuracy (ROC/AUC) because the rapid test gives a positive/negative call, not a continuous score with a threshold to choose.",
+          "columns inspected by header, dtype and shape only (400 rows, 3 columns): pcr and rapid are string columns with two levels each and no missing values; the third column (age) is not part of the question and is not used.",
+          "binding: outcome=pcr is the truth label with positive_label='pos'; x=rapid is the index test with test_positive_label='positive' (the two columns spell their positive level differently, so both labels are declared explicitly).",
+          "design properties the pipeline cannot verify from the data: every participant received PCR (no partial verification), and the 400 people are a consecutive or cross-sectional sample rather than a case-control sample; these are reported as checks for the researcher to confirm."
+        ]
+      },
+      "questions": null,
+      "final_excerpt": "The spec validated, the test ran, and the cross-check agrees. The spec, result and run output are in the `.skill_eval/diag_labels` directory. No project file was modified.\n\n**Test:** Sensitivity, specificity and predictive values (`diag_binary`, helper status)\n\n**Why:** The question is accuracy of a binary index test (rapid) against a binary reference standard (PCR), so the taxonomy path is agreement/accuracy \u2192 binary test accuracy. Cohen's kappa was ruled out because PCR is the truth, not a second rater, and ROC/AUC was ruled out because the rapid test gives a call, not a score.\n\n**Result** (n = 400; there is no headline statistic for this test, the estimates with Wilson confidence intervals are the answer):\n\n| Quantity | Estimate | 95% CI | Based on |\n| --- | --- | --- | --- |\n| Sensitivity | 0.882 | 0.812 to 0.929 | 105 / 119 PCR-positive |\n| Specificity | 0.957 | 0.927 to 0.975 | 269 / 281 PCR-negative |\n| PPV | 0.897 | 0.829 to 0.940 | depends on prevalence |\n| NPV | 0.951 | 0.919 to 0.970 | depends on prevalence |\n| LR+ | 20.7 | 11.8 to 36.1 | log method |\n| LR\u2212 | 0.123 | 0.075 to 0.201 | log method |\n| Accuracy | 0.935 | 0.906 to 0.955 | 374 / 400 |\n| Youden's J | 0.840 | | |\n\nSample prevalence of PCR positivity is 29.8%. The confusion table is 105 true positives, 12 false positives, 14 false negatives, 269 true negatives.\n\n**Assumptions:** both checks are design properties the pipeline cannot verify from the data, so they are marked \"to confirm\":\n- **Verification:** c"
+    }
+  ]
+}
