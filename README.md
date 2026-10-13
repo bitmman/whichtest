@@ -81,4 +81,4 @@ If you work inside this repository, nothing to copy: Claude Code picks the skill
 - The skill itself has been run through a model: `uv run python tools/skill_eval.py` drives headless Claude Code on eleven synthetic study descriptions and scores the specs it writes (routing, bindings, decisions asked rather than invented, no data rows read). Latest run: 11/11 (`tests/fixtures/skill_eval_latest.json`).
 - One-sided alternatives are accepted only by the tests that can honour them end to end; the others reject the request instead of quietly reporting a two-sided p-value.
 
-Next: try it on a real (synthetic-stand-in) analysis end to end, then tighten what the skill asks.
+Next: use it on a real study. Anything the skill gets wrong there becomes a new case in `tests/fixtures/skill_eval_cases.json`.
