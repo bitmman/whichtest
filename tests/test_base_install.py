@@ -16,7 +16,7 @@ import pytest
 from whichtest import Spec, run
 from whichtest.taxonomy import load_taxonomy
 
-OPTIONAL = ("pingouin", "lifelines", "krippendorff", "scikit_posthocs", "semopy")
+OPTIONAL = ("pingouin", "lifelines", "krippendorff", "scikit_posthocs", "semopy", "matplotlib")
 
 
 @pytest.fixture(autouse=True)
@@ -144,7 +144,7 @@ LONG_SPECS = {
     "nominal_gee": Spec(test="nominal_gee", variables=V(outcome="ynom", predictors=["visit"], subject="id"), decisions={"working_correlation": "independence"}),
 }
 # Cross-checks that live in an optional library: these must report NOT RUN in a base install.
-OPTIONAL_CROSS = {"friedman", "cochran_q", "fleiss_kappa", "km_logrank", "rm_anova", "cox", "cox_cluster", "partial_corr", "icc", "competing"}
+OPTIONAL_CROSS = {"friedman", "cochran_q", "fleiss_kappa", "km_logrank", "rm_anova", "cox", "cox_cluster", "partial_corr", "icc", "competing", "bland_altman"}
 
 
 def test_every_taxonomy_test_has_a_spec_here():

@@ -18,10 +18,11 @@ dependencies = [
 # Independent libraries used only for cross-checks and post-hoc helpers.
 cross = [
     "pingouin>=0.5.4",
-    "lifelines>=0.28",
+    "lifelines>=0.30",
     "krippendorff>=0.6",
     "scikit-posthocs>=0.8",
     "semopy>=2.3.11",
+    "matplotlib>=3.7",  # statsmodels mean_diff_plot, the Bland–Altman cross-check
 ]
 dev = [
     "pytest>=7",

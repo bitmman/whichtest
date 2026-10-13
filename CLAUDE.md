@@ -271,6 +271,6 @@ Still open: the evaluation has one run per case on one model; routing errors are
 
 ## Conventions
 
-- Tooling: `uv` (`uv sync --extra dev`, `uv run pytest`, `uv run whichtest ...`). The `cross` extra holds the independent libraries used only in cross-checks and post-hoc helpers; procedures import them lazily and degrade (no cross-check, noted) if absent.
+- Tooling: `uv` (`uv sync --extra dev`, `uv run pytest`, `uv run whichtest ...`). The `cross` extra holds the independent libraries used only in cross-checks and post-hoc helpers (pingouin, lifelines, krippendorff, scikit-posthocs, semopy, and matplotlib for the Bland–Altman cross-check through statsmodels' plot); procedures import them lazily and degrade (no cross-check, flagged) if absent. In CI, every step after `uv sync --resolution lowest-direct` must use `uv run --no-sync`, or `uv run` re-syncs to the lockfile's highest resolution and mixes versions (first CI run, 2026-10-12: lifelines 0.28 on scipy 1.18). The lowest-direct cells run on 3.10 and 3.11 only; the numpy/pandas floors have no wheels for 3.12+.
 - Keep two docs per project: `README.md` (short, for the human) and `CLAUDE.md` (detailed, for agents). Update both.
 - Never send raw study data to any external service. Synthetic data only in tests and examples.

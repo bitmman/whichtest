@@ -13,6 +13,13 @@ jobs:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
         resolution: ["highest", "lowest-direct"]
+        exclude:
+          # The declared floors (numpy 1.24, pandas 2.0) have no wheels for 3.12+; a user on those
+          # Pythons gets newer versions automatically, which the "highest" cells cover.
+          - python: "3.12"
+            resolution: lowest-direct
+          - python: "3.13"
+            resolution: lowest-direct
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -20,10 +27,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install (dev + cross extras)
         run: uv sync --extra dev --resolution ${{ matrix.resolution }}
+      # --no-sync: a plain `uv run` would re-sync to the lockfile's (highest) resolution and silently
+      # mix versions; the environment the Install step built is the one under test.
       - name: Report versions
-        run: uv run python -c "import sys, numpy, pandas, scipy, statsmodels, pingouin, lifelines, sklearn; print(sys.version); [print(m.__name__, m.__version__) for m in (numpy, pandas, scipy, statsmodels, pingouin, lifelines, sklearn)]"
+        run: uv run --no-sync python -c "import sys, numpy, pandas, scipy, statsmodels, pingouin, lifelines, sklearn; print(sys.version); [print(m.__name__, m.__version__) for m in (numpy, pandas, scipy, statsmodels, pingouin, lifelines, sklearn)]"
       - name: Test
-        run: uv run pytest -q
+        run: uv run --no-sync pytest -q
 
   base-only:
     name: base install (no cross extra)
